@@ -102,6 +102,7 @@ pub fn build_manifest(browser: &BrowserKind, host_path: &Path, extension_id: &st
 pub fn manifest_dir(browser: &BrowserKind, home: &Path, localappdata: &Path) -> PathBuf {
     #[cfg(target_os = "windows")]
     {
+        let _ = (browser, home);
         return localappdata
             .join("Banana Hand")
             .join("native-host-manifests");

@@ -1,9 +1,11 @@
 use std::{
     fs,
-    io::{BufRead, BufReader, Write},
     sync::{Arc, mpsc::Sender},
     thread,
 };
+
+#[cfg(not(target_os = "windows"))]
+use std::io::{BufRead, BufReader, Write};
 
 use banana_hand_protocol::{
     BrowserKind, HostBridgeRequest, HostBridgeResponse, NativeHostBridgeConfig, PROTOCOL_MAJOR,
@@ -229,7 +231,8 @@ fn serve_pipe(
         let Some(message) = pipe_read_message(pipe) else {
             break;
         };
-        let line = String::from_utf8_lossy(&message).trim_end_matches('\n');
+        let lossy = String::from_utf8_lossy(&message);
+        let line = lossy.trim_end_matches('\n');
         let response = dispatch_inbound(&coordinator, line, &capability_token, writer.clone());
         if writer.send(response).is_err() {
             break;
