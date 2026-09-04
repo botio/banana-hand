@@ -84,13 +84,18 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ matrix.macos_signing_identity }}
         run: npm run tauri -- build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
 
-      - name: Verify macOS app ad-hoc signature
+      - name: Verify macOS app ad-hoc signature inside the DMG
         if: matrix.target == 'aarch64-apple-darwin'
         run: |
-          app=$(find target/${{ matrix.target }}/release/bundle/macos -type d -name '*.app' -print -quit)
+          dmg=$(find target/${{ matrix.target }}/release/bundle/dmg -name '*.dmg' -print -quit)
+          test -n "${dmg}"
+          mount_point=$(mktemp -d /tmp/banana-hand-dmg.XXXXXX)
+          hdiutil attach "${dmg}" -nobrowse -noverify -mountpoint "${mount_point}"
+          app=$(find "${mount_point}" -maxdepth 1 -type d -name '*.app' -print -quit)
           test -n "${app}"
           codesign --verify --deep --strict "${app}"
           codesign --display --verbose=4 "${app}"
+          hdiutil detach "${mount_point}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
