@@ -22,6 +22,10 @@ let selectedFirstTarget: string | undefined;
 let selectedSecondTarget: string | undefined;
 let repository: SettingsRepository | undefined;
 let statusMessage = "正在連線到桌面協調器…";
+let shortcutDraft = { name: "", chord: "" };
+let nativeHostBrowser: "chrome" | "firefox" = "chrome";
+let nativeHostResult = "";
+let dispatchResult = "";
 const MODIFIER_NAME_BY_INPUT: Record<string, string> = {
   ctrl: "Ctrl",
   alt: "Alt",
@@ -144,8 +148,7 @@ function render(): void {
         </div>
         <p class="contract">
           Browser 透過 native messaging 機制啟動 native host；native host 再經 OS-user IPC
-          連回桌面 App。這裡把 host 登錄到指定 browser（寫入該 browser 的 native-messaging
-          manifest），Chromium 系的 extension id 需填入，Firefox 使用固定 id。
+          連回桌面 App。選擇 browser 後登錄 native host，extension 連線後會自動回報可選分頁。
         </p>
         <div class="native-host-form">
           <label>
@@ -154,10 +157,6 @@ function render(): void {
               <option value="chrome">Chrome / Chromium</option>
               <option value="firefox">Firefox</option>
             </select>
-          </label>
-          <label>
-            Extension ID（Chromium 系必填）
-            <input id="nh-extension-id" placeholder="例如商店分配的 extension id" />
           </label>
           <button id="nh-register" class="dispatch-button" type="button">登錄 native host</button>
         </div>
@@ -215,10 +214,30 @@ function render(): void {
   requireElement("#proof").textContent = shortcut && firstTarget && secondTarget
     ? `「${shortcut.name}」${shortcut.chord} → ${formatTab(firstTarget)}、${formatTab(secondTarget)}`
     : "選取一個快捷鍵與兩個已連線目標後，才可發送。";
+  requireElement("#result").textContent = dispatchResult;
+  requireElement("#nh-result").textContent = nativeHostResult;
+
 
   const dispatch = requireElement<HTMLButtonElement>("#dispatch");
   dispatch.disabled = !canDispatch();
   dispatch.addEventListener("click", dispatchShortcut);
+
+  const shortcutName = requireElement<HTMLInputElement>('input[name="name"]');
+  shortcutName.value = shortcutDraft.name;
+  shortcutName.addEventListener("input", () => {
+    shortcutDraft.name = shortcutName.value;
+  });
+  const shortcutChord = requireElement<HTMLInputElement>('input[name="chord"]');
+  shortcutChord.value = shortcutDraft.chord;
+  shortcutChord.addEventListener("input", () => {
+    shortcutDraft.chord = shortcutChord.value;
+  });
+  const nativeHostSelect = requireElement<HTMLSelectElement>("#nh-browser");
+  nativeHostSelect.value = nativeHostBrowser;
+  nativeHostSelect.addEventListener("change", () => {
+    nativeHostBrowser = nativeHostSelect.value as "chrome" | "firefox";
+  });
+
   requireElement<HTMLFormElement>("#shortcut-form").addEventListener("submit", addShortcut);
   requireElement<HTMLButtonElement>("#nh-register").addEventListener("click", registerNativeHost);
 }
@@ -236,25 +255,22 @@ function populateTargets(selector: string, selected: string | undefined, onChang
 }
 
 async function registerNativeHost(): Promise<void> {
-  const browser = requireElement<HTMLSelectElement>("#nh-browser").value as
-    | "chrome"
-    | "firefox";
-  const extensionId = requireElement<HTMLInputElement>("#nh-extension-id").value.trim();
-  const resultEl = requireElement<HTMLElement>("#nh-result");
-  resultEl.textContent = "正在登錄 native host…";
+  const browser = nativeHostBrowser;
+  nativeHostResult = "正在登錄 native host…";
+  render();
   try {
     const result = await invoke<NativeHostRegistrationResult>("register_native_host", {
       request: {
         browser,
         hostPath: null,
-        extensionId: extensionId === "" ? null : extensionId,
       },
     });
     const warning = result.hostExists ? "" : "（注意：native host binary 目前不存在）";
-    resultEl.textContent = `已寫入 ${result.manifestPath}。${result.registryLocation}${warning}`;
+    nativeHostResult = `已寫入 ${result.manifestPath}。${result.registryLocation}${warning}`;
   } catch (error) {
-    resultEl.textContent = `登錄失敗：${String(error)}`;
+    nativeHostResult = `登錄失敗：${String(error)}`;
   }
+  render();
 }
 
 async function addShortcut(event: SubmitEvent): Promise<void> {
@@ -269,6 +285,7 @@ async function addShortcut(event: SubmitEvent): Promise<void> {
     const shortcut = { id: crypto.randomUUID(), name, chord, order: settings.shortcuts.length };
     settings = await repository.replaceShortcuts([...settings.shortcuts, shortcut]);
     selectedShortcutId = shortcut.id;
+    shortcutDraft = { name: "", chord: "" };
     statusMessage = `已儲存「${name}」。`;
     render();
   } catch (error) {
@@ -283,8 +300,8 @@ async function dispatchShortcut(): Promise<void> {
   const secondTarget = selectedTab(selectedSecondTarget);
   if (!shortcut || !firstTarget || !secondTarget) return;
 
-  const result = requireElement("#result");
-  result.textContent = "正在要求 native host 驗證兩個目標…";
+  dispatchResult = "正在要求 native host 驗證兩個目標…";
+  render();
   try {
     const outcome = await invoke<DispatchOutcome>("request_dispatch", {
       request: {
@@ -297,10 +314,11 @@ async function dispatchShortcut(): Promise<void> {
         second_target: secondTarget.target,
       },
     });
-    result.textContent = formatOutcome(outcome);
+    dispatchResult = formatOutcome(outcome);
     await refreshRuntime();
   } catch (error) {
-    result.textContent = error instanceof Error ? error.message : "發送請求失敗。";
+    dispatchResult = error instanceof Error ? error.message : "發送請求失敗。";
+    render();
   }
 }
 

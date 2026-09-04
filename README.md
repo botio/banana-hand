@@ -22,12 +22,7 @@ Banana Hand 讓「一個快捷鍵」同時對兩個瀏覽器分頁做動作。�
 從最新的 [GitHub Preview Release](https://github.com/botio/banana-hand/releases) 下載符合
 作業系統的 desktop asset：
 - **Windows**：執行 NSIS `.exe` 安裝程式。
-- **macOS（僅 Apple Silicon）**：下載檔名含 `_aarch64.dmg` 的 Preview asset，並把 `Banana Hand.app` 拖到「應用程式」。此 app 未經 Apple notarization；若確認它直接來自本 repository 的 GitHub Release，且 macOS 顯示「已毀損」，可在 Terminal 執行：
-  ```sh
-  xattr -dr com.apple.quarantine "/Applications/Banana Hand.app"
-  open "/Applications/Banana Hand.app"
-  ```
-  這只移除下載 quarantine，不會修復真正遭竄改的 app；若警告是「will damage your computer」，請不要執行，直接移至垃圾桶。
+- **macOS（僅 Apple Silicon）**：下載檔名含 `_aarch64.dmg` 的 Preview asset，並把 `Banana Hand.app` 拖到「應用程式」。app 使用 ad-hoc signing、未經 Apple notarization；首次開啟被 Gatekeeper 擋時，先按「完成」，再到「系統設定 → 隱私權與安全性」按「仍要開啟／Open Anyway」。這只應用於你直接從本 repository GitHub Release 下載的 app；若警告是「will damage your computer」，請直接移至垃圾桶。
 - **Linux**：安裝 `.deb`（或使用 AppImage）。
 
 > App 靠「瀏覽器插件」看得到你的分頁。Preview Release 附帶 Chrome 的
@@ -53,8 +48,8 @@ Banana Hand 讓「一個快捷鍵」同時對兩個瀏覽器分頁做動作。�
 ### 第 3 步：讓 Browser 找到 Host
 1. 開啟 Banana Hand，到「讓 Browser 找到 Host」面板。
 2. 選你的瀏覽器（`Chrome / Chromium` 或 `Firefox`）。
-3. Chrome / Chromium 要填 **Extension ID**：回 `chrome://extensions` 點「Banana Hand」的「詳細資料」即可看到；Firefox 用固定 id，欄位留空。
-4. 按「登錄 native host」，出現「已寫入 …」即成功。
+3. 按「登錄 native host」。兩個 extension 都使用固定 ID，不需要貼任何值。
+4. extension 連線後，App 會自動顯示可選 Browser Tab；若已載入舊版 Chrome extension，請到 `chrome://extensions` 對 Banana Hand 按「重新載入」一次。
 
 ### 第 4 步：發送
 1. 在「快捷鍵庫」按「新增快捷鍵」，填名稱與組合（例如 `Ctrl+Shift+K`）。

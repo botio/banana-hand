@@ -31,12 +31,15 @@ jobs:
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
             bundles: "deb,appimage"
+            macos_signing_identity: ""
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             bundles: "nsis"
+            macos_signing_identity: ""
           - os: macos-latest
             target: aarch64-apple-darwin
             bundles: "dmg"
+            macos_signing_identity: "-"
 
     steps:
       - name: Checkout
@@ -73,9 +76,21 @@ jobs:
         run: npm ci
 
       # Runs `beforeBuildCommand` (native-host sidecar + frontend build), then
-      # bundles only the targets valid for this OS.
+      # bundles only the targets valid for this OS. `-` requests ad-hoc signing
+      # on macOS, which keeps the Privacy & Security "Open Anyway" path without
+      # requiring an Apple Developer certificate.
       - name: Build app + native-host sidecar
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ matrix.macos_signing_identity }}
         run: npm run tauri -- build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+
+      - name: Verify macOS app ad-hoc signature
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: |
+          app=$(find target/${{ matrix.target }}/release/bundle/macos -type d -name '*.app' -print -quit)
+          test -n "${app}"
+          codesign --verify --deep --strict "${app}"
+          codesign --display --verbose=4 "${app}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

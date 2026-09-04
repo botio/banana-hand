@@ -20,6 +20,8 @@ const MANIFEST_DESCRIPTION: &str = "Banana Hand Native Messaging host";
 
 /// Fixed Firefox (AMO) extension id, from `extensions/firefox/manifest.json`.
 const FIREFOX_EXTENSION_ID: &str = "bridge@banana-hand.dev";
+/// Fixed Chromium extension id derived from `extensions/chromium/manifest.json`'s key.
+const CHROMIUM_EXTENSION_ID: &str = "mooakjhlbkjfbmbmliklkmfmacnomlai";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -30,10 +32,6 @@ pub struct RegisterNativeHostRequest {
     /// host are both built into `target/<profile>/`).
     #[serde(default)]
     pub host_path: Option<PathBuf>,
-    /// Browser extension id. Required for the Chromium family (store-assigned);
-    /// ignored for Firefox, whose id is fixed in the manifest.
-    #[serde(default)]
-    pub extension_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -52,8 +50,6 @@ pub struct RegisterNativeHostResult {
 
 #[derive(Debug, thiserror::Error)]
 pub enum RegistrationError {
-    #[error("Chromium 系 extension 的 id 由商店分配；請提供 extension id")]
-    MissingExtensionId,
     #[error("native host 路徑必須是絕對路徑：{0}")]
     HostPathNotAbsolute(PathBuf),
     #[error("寫入 native-messaging manifest 失敗（{0}）：{1}")]
@@ -69,7 +65,7 @@ pub fn manifest_file_name() -> String {
 }
 
 /// Build the native-messaging manifest JSON for a browser.
-pub fn build_manifest(browser: &BrowserKind, host_path: &Path, extension_id: &str) -> Value {
+pub fn build_manifest(browser: &BrowserKind, host_path: &Path) -> Value {
     let mut manifest = serde_json::json!({
         "name": HOST_NAME,
         "description": MANIFEST_DESCRIPTION,
@@ -79,12 +75,12 @@ pub fn build_manifest(browser: &BrowserKind, host_path: &Path, extension_id: &st
     match browser {
         BrowserKind::Firefox => {
             manifest["allowed_extensions"] =
-                Value::Array(vec![Value::String(extension_id.to_owned())]);
+                Value::Array(vec![Value::String(FIREFOX_EXTENSION_ID.to_owned())]);
             manifest
         }
         BrowserKind::Chrome => {
             manifest["allowed_origins"] = Value::Array(vec![Value::String(format!(
-                "chrome-extension://{extension_id}/"
+                "chrome-extension://{CHROMIUM_EXTENSION_ID}/"
             ))]);
             manifest
         }
@@ -182,17 +178,6 @@ fn default_host_path() -> PathBuf {
     parent.join(name)
 }
 
-/// Resolve the extension id: the request value, or the fixed Firefox id.
-fn resolve_extension_id(request: &RegisterNativeHostRequest) -> Result<String, RegistrationError> {
-    match &request.extension_id {
-        Some(id) if !id.trim().is_empty() => Ok(id.trim().to_owned()),
-        Some(_) => Err(RegistrationError::MissingExtensionId),
-        None => match request.browser {
-            BrowserKind::Firefox => Ok(FIREFOX_EXTENSION_ID.to_owned()),
-            BrowserKind::Chrome => Err(RegistrationError::MissingExtensionId),
-        },
-    }
-}
 
 /// Write the manifest to disk and (on Windows) point the registry at it.
 ///
@@ -205,7 +190,6 @@ pub fn register_in(
 ) -> Result<RegisterNativeHostResult, RegistrationError> {
     let host_path = resolve_host_path(request)?;
     let host_exists = host_path.exists();
-    let extension_id = resolve_extension_id(request)?;
     let manifest_path = manifest_file_path(&request.browser, home, localappdata);
 
     if let Some(parent) = manifest_path.parent() {
@@ -213,7 +197,7 @@ pub fn register_in(
             RegistrationError::WriteFailed(manifest_path.clone(), error.to_string())
         })?;
     }
-    let manifest = build_manifest(&request.browser, &host_path, &extension_id);
+    let manifest = build_manifest(&request.browser, &host_path);
     let encoded = serde_json::to_string_pretty(&manifest).map_err(|error| {
         RegistrationError::WriteFailed(manifest_path.clone(), error.to_string())
     })?;
@@ -320,21 +304,20 @@ mod tests {
         let manifest = build_manifest(
             &BrowserKind::Firefox,
             Path::new("/opt/banana-hand/banana-hand-native-host"),
-            FIREFOX_EXTENSION_ID,
         );
         assert_eq!(manifest["name"], HOST_NAME);
         assert_eq!(manifest["type"], "stdio");
         assert_eq!(manifest["path"], "/opt/banana-hand/banana-hand-native-host");
-        assert_eq!(manifest["allowed_extensions"][0], "bridge@banana-hand.dev");
+        assert_eq!(manifest["allowed_extensions"][0], FIREFOX_EXTENSION_ID);
         assert!(manifest.get("allowed_origins").is_none());
     }
 
     #[test]
-    fn chromium_manifest_uses_allowed_origins() {
-        let manifest = build_manifest(&BrowserKind::Chrome, Path::new("/app/host.exe"), "abcd1234");
+    fn chromium_manifest_uses_fixed_extension_id() {
+        let manifest = build_manifest(&BrowserKind::Chrome, Path::new("/app/host.exe"));
         assert_eq!(
             manifest["allowed_origins"][0],
-            "chrome-extension://abcd1234/"
+            format!("chrome-extension://{CHROMIUM_EXTENSION_ID}/")
         );
         assert!(manifest.get("allowed_extensions").is_none());
     }
@@ -376,7 +359,6 @@ mod tests {
         let request = RegisterNativeHostRequest {
             browser: BrowserKind::Firefox,
             host_path: Some(host.clone()),
-            extension_id: None,
         };
         let result = register_in(&temp, Path::new(""), &request).expect("register firefox");
         assert!(result.manifest_path.exists());
@@ -392,14 +374,29 @@ mod tests {
     }
 
     #[test]
-    fn chromium_without_extension_id_is_rejected() {
+    fn chromium_registration_writes_manifest_with_fixed_extension_id() {
+        let temp = std::env::temp_dir().join(format!(
+            "banana-hand-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|value| value.as_nanos())
+                .unwrap_or(0)
+        ));
+        fs::create_dir_all(&temp).expect("create temp home");
+        let host = temp.join("banana-hand-native-host");
+        fs::write(&host, b"fake native host").expect("write fake host");
         let request = RegisterNativeHostRequest {
             browser: BrowserKind::Chrome,
-            host_path: Some(PathBuf::from("/opt/banana-hand/banana-hand-native-host")),
-            extension_id: None,
+            host_path: Some(host),
         };
-        let error = register_in(Path::new("/home/user"), Path::new(""), &request)
-            .expect_err("must reject chromium without id");
-        assert!(matches!(error, RegistrationError::MissingExtensionId));
+        let result = register_in(&temp, Path::new(""), &request).expect("register chromium");
+        let written = fs::read_to_string(&result.manifest_path).expect("read written manifest");
+        let parsed: Value = serde_json::from_str(&written).expect("valid json");
+        assert_eq!(
+            parsed["allowed_origins"][0],
+            format!("chrome-extension://{CHROMIUM_EXTENSION_ID}/")
+        );
+        let _ = fs::remove_dir_all(&temp);
     }
 }
