@@ -8,6 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "native-host-manifest": "node scripts/write-native-host-manifest.mjs",
     "bundle-native-host": "node scripts/bundle-native-host.mjs",
+    "package-firefox-extension": "node scripts/package-firefox-extension.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

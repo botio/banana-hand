@@ -12,7 +12,7 @@ Banana Hand 讓「一個快捷鍵」同時對兩個瀏覽器分頁做動作。�
 - **Linux**：安裝 `.deb`（或用 AppImage）。
 
 ### 第 2 步：加入瀏覽器插件
-> App 靠「瀏覽器插件」看得到你的分頁。插件還沒上架商店，目前要先用「未封裝」方式載入（取得專案來源或發布包後照做；正式版本會改成商店一鍵安裝）。
+> App 靠「瀏覽器插件」看得到你的分頁。插件還沒上架商店：**Chrome** 可以用「未封裝」方式直接載入資料夾；**Firefox** 只接受打包好的 `.xpi`，而且**未簽名的 `.xpi` 只有 Firefox Developer Edition／Nightly／ESR 裝得到**（正式版會以「需要簽名」拒絕）——正式發行經 AMO 簽名後，任何 Firefox 都能直接裝。
 
 **Chrome**
 1. 地址列輸入 `chrome://extensions`，按 Enter。
@@ -21,9 +21,9 @@ Banana Hand 讓「一個快捷鍵」同時對兩個瀏覽器分頁做動作。�
 4. 清單出現「Banana Hand」即成功。
 
 **Firefox**
-1. 地址列輸入 `about:addons`，按 Enter。
-2. 右上角齒輪選「安裝附加元件…」(Install Add-on From File)。
-3. 選到 `extensions/firefox/manifest.json`。
+1. 先打包：跑 `npm run package-firefox-extension`，產生 `dist/firefox-extension/banana-hand-firefox-<版本>.xpi`。
+2. （未簽名才需要）用 **Firefox Developer Edition／Nightly／ESR**，到 `about:config` 把 `xpinstall.signatures.required` 設成 `false`。
+3. 地址列輸入 `about:addons` → 右上齒輪 →「安裝附加元件…」→ 選到第 1 步的 `.xpi`。
 4. 出現「Banana Hand」即成功。
 
 ### 第 3 步：讓 Browser 找到 Host
