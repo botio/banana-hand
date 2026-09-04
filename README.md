@@ -22,7 +22,12 @@ Banana Hand 讓「一個快捷鍵」同時對兩個瀏覽器分頁做動作。�
 從最新的 [GitHub Preview Release](https://github.com/botio/banana-hand/releases) 下載符合
 作業系統的 desktop asset：
 - **Windows**：執行 NSIS `.exe` 安裝程式。
-- **macOS（僅 Apple Silicon）**：只下載 release note 明示為「signed and notarized」的 `_aarch64.dmg`。`v0.1.0` 的未 notarize DMG 已撤下，因為 macOS 會把它判為「已毀損」；不要移除 quarantine 屬性繞過此警告。發行流程完成 Developer ID signing 與 Apple notarization 後，app 應可正常開啟；若仍失敗，請回報完整彈窗文字。
+- **macOS（僅 Apple Silicon）**：下載檔名含 `_aarch64.dmg` 的 Preview asset，並把 `Banana Hand.app` 拖到「應用程式」。此 app 未經 Apple notarization；若確認它直接來自本 repository 的 GitHub Release，且 macOS 顯示「已毀損」，可在 Terminal 執行：
+  ```sh
+  xattr -dr com.apple.quarantine "/Applications/Banana Hand.app"
+  open "/Applications/Banana Hand.app"
+  ```
+  這只移除下載 quarantine，不會修復真正遭竄改的 app；若警告是「will damage your computer」，請不要執行，直接移至垃圾桶。
 - **Linux**：安裝 `.deb`（或使用 AppImage）。
 
 > App 靠「瀏覽器插件」看得到你的分頁。Preview Release 附帶 Chrome 的

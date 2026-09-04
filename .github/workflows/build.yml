@@ -68,23 +68,6 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Prepare macOS signing and notarization credentials
-        if: matrix.target == 'aarch64-apple-darwin'
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
-        run: |
-          test -n "${APPLE_CERTIFICATE}"
-          test -n "${APPLE_CERTIFICATE_PASSWORD}"
-          test -n "${APPLE_API_KEY}"
-          test -n "${APPLE_API_ISSUER}"
-          test -n "${APPLE_API_KEY_P8}"
-          install -d -m 700 private_keys
-          printf '%s' "${APPLE_API_KEY_P8}" > "private_keys/AuthKey_${APPLE_API_KEY}.p8"
-          chmod 600 "private_keys/AuthKey_${APPLE_API_KEY}.p8"
 
       - name: Install frontend dependencies
         run: npm ci
@@ -92,12 +75,6 @@ jobs:
       # Runs `beforeBuildCommand` (native-host sidecar + frontend build), then
       # bundles only the targets valid for this OS.
       - name: Build app + native-host sidecar
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_API_KEY_PATH: ${{ github.workspace }}/private_keys/AuthKey_${{ secrets.APPLE_API_KEY }}.p8
         run: npm run tauri -- build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
 
       - name: Upload artifacts
@@ -161,7 +138,7 @@ jobs:
             -o -name '*.zip' -o -name '*.xpi' \
           \) -print0)
           test "${#assets[@]}" -gt 0
-          notes=$'Preview release only: build artifacts are attached, but this release does not claim a supported platform/browser pair. See docs/adr/0003-release-evidence-matrix.md for the required 24-cell real-device evidence matrix.\n\nThe macOS DMG is signed and notarized for Apple Silicon (aarch64). If macOS reports that an app is damaged, do not bypass it; report the exact message.\n\nThe Firefox XPI is AMO-signed through the unlisted channel and installs in release-channel Firefox.'
+          notes=$'Preview release only: build artifacts are attached, but this release does not claim a supported platform/browser pair. See docs/adr/0003-release-evidence-matrix.md for the required 24-cell real-device evidence matrix.\n\nThe macOS DMG targets Apple Silicon (aarch64) and is unsigned. If a trusted download from this repository is reported as damaged, follow the README command to remove only its com.apple.quarantine attribute; do not do this for an altered or untrusted app.\n\nThe Firefox XPI is AMO-signed through the unlisted channel and installs in release-channel Firefox.'
           if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             gh release edit "${GITHUB_REF_NAME}" \
               --repo "${GITHUB_REPOSITORY}" \
