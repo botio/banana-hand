@@ -2,29 +2,47 @@
 
 以 Tauri 2 + Rust 建立的桌面發送協調器。使用者在每次 App 啟動後，從已連線的 Chrome 或 Firefox WebExtension 選出兩個不同的 Browser Tab，再將快捷鍵庫中選定的單一組合按鍵依序做盡力原生發送。
 
+## 下載與 Preview Release
+
+每個推送的 `v*` tag 都會由 GitHub Actions 建立一個
+[GitHub Preview Release](https://github.com/botio/banana-hand/releases)：內含 Windows
+NSIS、macOS 未簽署 DMG、Linux `.deb`／AppImage，以及 Chrome extension 的 `.zip` 和
+Firefox extension 的 `.xpi`。這些是可下載、可驗證的打包產物；**Preview 不表示任何
+平台／browser 配對已得到正式支援宣稱**。正式支援前仍須完成
+[ADR 0003 的 24-cell 實機發布證據矩陣](docs/adr/0003-release-evidence-matrix.md)。
+
+Firefox `.xpi` 目前未經 AMO 簽署，只能在 Firefox Developer Edition、Nightly 或
+ESR（停用 signature enforcement）安裝。
+
 ## 使用說明（給一般使用者）
 
 Banana Hand 讓「一個快捷鍵」同時對兩個瀏覽器分頁做動作。第一次使用照下面四步走：
 
 ### 第 1 步：安裝桌面 App
-- **Windows**：執行 NSIS 安裝程式。
-- **macOS**：把 DMG 裡的 `Banana Hand` 拖到「應用程式」。首次開啟會先被 Gatekeeper 擋，選「開啟」後再到「系統設定 → 隱私與安全性」再按「仍要開啟」，並授予「輔助功能」權限。
-- **Linux**：安裝 `.deb`（或用 AppImage）。
+從最新的 [GitHub Preview Release](https://github.com/botio/banana-hand/releases) 下載符合
+作業系統的 desktop asset：
+- **Windows**：執行 NSIS `.exe` 安裝程式。
+- **macOS**：開啟未簽署的 DMG，把 `Banana Hand` 拖到「應用程式」。首次開啟會先被 Gatekeeper 擋，選「開啟」後再到「系統設定 → 隱私與安全性」按「仍要開啟」，並授予「輔助功能」權限。
+- **Linux**：安裝 `.deb`（或使用 AppImage）。
 
 ### 第 2 步：加入瀏覽器插件
-> App 靠「瀏覽器插件」看得到你的分頁。插件還沒上架商店：**Chrome** 可以用「未封裝」方式直接載入資料夾；**Firefox** 只接受打包好的 `.xpi`，而且**未簽名的 `.xpi` 只有 Firefox Developer Edition／Nightly／ESR 裝得到**（正式版會以「需要簽名」拒絕）——正式發行經 AMO 簽名後，任何 Firefox 都能直接裝。
+> App 靠「瀏覽器插件」看得到你的分頁。Preview Release 附帶 Chrome 的
+> `banana-hand-chromium-<版本>.zip` 與 Firefox 的
+> `banana-hand-firefox-<版本>.xpi`。插件尚未上架商店：Chrome 仍以「未封裝」方式
+> 載入解壓後的資料夾；Firefox 的未簽名 `.xpi` 只有 Firefox Developer Edition／Nightly／ESR 裝得到。正式發行經 AMO 簽名後，任何 Firefox 都能直接裝。
 
 **Chrome**
-1. 地址列輸入 `chrome://extensions`，按 Enter。
-2. 右上角把「開發者模式」打開。
-3. 按「載入未封裝的擴充功能」，選到專案裡的 `extensions/chromium/` 資料夾。
-4. 清單出現「Banana Hand」即成功。
+1. 從同版本 Preview Release 下載 `banana-hand-chromium-<版本>.zip` 並解壓。
+2. 地址列輸入 `chrome://extensions`，按 Enter。
+3. 右上角把「開發者模式」打開。
+4. 按「載入未封裝的擴充功能」，選擇解壓後、含 `manifest.json` 的資料夾。
+5. 清單出現「Banana Hand Browser Bridge」即成功。
 
 **Firefox**
-1. 先打包：跑 `npm run package-firefox-extension`，產生 `dist/firefox-extension/banana-hand-firefox-<版本>.xpi`。
+1. 從同版本 Preview Release 下載 `banana-hand-firefox-<版本>.xpi`；本機開發可改跑 `npm run package-firefox-extension`。
 2. （未簽名才需要）用 **Firefox Developer Edition／Nightly／ESR**，到 `about:config` 把 `xpinstall.signatures.required` 設成 `false`。
-3. 地址列輸入 `about:addons` → 右上齒輪 →「安裝附加元件…」→ 選到第 1 步的 `.xpi`。
-4. 出現「Banana Hand」即成功。
+3. 地址列輸入 `about:addons` → 右上齒輪 →「安裝附加元件…」→ 選第 1 步的 `.xpi`。
+4. 出現「Banana Hand Browser Bridge」即成功。
 
 ### 第 3 步：讓 Browser 找到 Host
 1. 開啟 Banana Hand，到「讓 Browser 找到 Host」面板。
@@ -112,8 +130,9 @@ App 內也可直接登錄 native host：在「讓 Browser 找到 Host」面板�
   CGEvent 會先查 Accessibility；未簽署、未 notarize 的 DMG 需使用者 Gatekeeper
   「Open Anyway」+ 授 Accessibility，仍待實機驗證。
 
-因此目前沒有任何平台／browser 配對可被標示為已發行；發布前必須完成 ADR 0003
-規定的 24-cell 發布證據矩陣。
+因此 GitHub Release 目前一律標為 **Preview**：它提供版本化、可驗證的下載 artifact，
+但沒有任何平台／browser 配對可被標示為已正式支援；發布前仍必須完成 ADR 0003 規定的
+24-cell 發布證據矩陣。
 
 ## 打包與分發
 
@@ -122,6 +141,10 @@ native host 以 Tauri sidecar（`bundle.externalBin`）隨 App 一起打包：
 `crates/native-host`，放到 `src-tauri/binaries/<name>-<triple>[.exe]`。
 `register_native_host` 的預設 host 路徑是「執行檔同層」，正好落在 sidecar
 位置，所以 installer 把兩者放進安裝目錄後，browser 不需額外地找到 host。
+
+推送 `v*` tag 時，GitHub Actions 會原生建置三個 desktop target，下載 workflow artifacts，
+再打包 Chrome extension `.zip` 與 Firefox unsigned `.xpi`，最後建立（或在 rerun 時更新）
+同 tag 的 GitHub Preview Release。
 
 各 artifact 的狀態（「已驗證」＝本開發機已產出並檢查；「實機待驗」＝
 source 與打包邏輯就緒，尚無該平台真機證據）：
