@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Calibration Desk — 兩個分頁的一次派送</title>
+  <style>
+    :root {
+      --paper: #efe9dc;
+      --paper-deep: #e5dccb;
+      --paper-light: #f8f4eb;
+      --ink: #292721;
+      --muted: #756e62;
+      --rule: #b9ae9c;
+      --amber: #a55b18;
+      --amber-soft: #efd7b9;
+      --blocked: #8d3d32;
+      --success: #566456;
+      --shadow: rgba(55, 41, 22, .14);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-width: 1100px;
+      min-height: 900px;
+      color: var(--ink);
+      background:
+        radial-gradient(ellipse at 18% 2%, rgba(255,255,255,.88), transparent 38%),
+        repeating-linear-gradient(0deg, rgba(92,72,40,.028) 0 1px, transparent 1px 5px),
+        var(--paper);
+      font-family: Georgia, "Times New Roman", serif;
+    }
+
+    .desk {
+      width: min(1288px, calc(100vw - 88px));
+      min-height: 900px;
+      margin: 0 auto;
+      padding: 22px 0 16px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .masthead {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: end;
+      gap: 24px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--ink);
+    }
+    .eyebrow, .mono, button, select, input, .status-key, .session-stamp {
+      font-family: "DM Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      letter-spacing: .04em;
+    }
+    .eyebrow { font-size: 11px; text-transform: uppercase; color: var(--muted); }
+    .masthead h1 { margin: 0; font-size: 29px; font-weight: 500; letter-spacing: -.035em; }
+    .masthead .right-note { text-align: right; font-size: 11px; color: var(--muted); line-height: 1.5; }
+
+    .subtitle {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 0 12px;
+      border-bottom: 1px solid var(--rule);
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .refresh {
+      border: 0;
+      border-bottom: 1px solid var(--ink);
+      background: transparent;
+      padding: 2px 0 4px;
+      color: var(--ink);
+      cursor: pointer;
+      font-size: 11px;
+    }
+    .refresh:hover { color: var(--amber); border-color: var(--amber); }
+
+    .comparison {
+      display: grid;
+      grid-template-columns: 1fr 56px 1fr;
+      align-items: stretch;
+      margin-top: 12px;
+    }
+    .target {
+      position: relative;
+      min-height: 218px;
+      padding: 14px 18px 12px;
+      background: rgba(248,244,235,.54);
+      border-top: 2px solid var(--ink);
+      border-bottom: 1px solid var(--ink);
+    }
+    .target-a { border-left: 1px solid var(--ink); }
+    .target-b { border-right: 1px solid var(--ink); }
+    .target:focus-within { background: var(--paper-light); }
+    .target-label { display: flex; justify-content: space-between; align-items: baseline; }
+    .target-label strong { font-size: 15px; font-weight: 500; }
+    .target-label span { color: var(--muted); font-size: 10px; }
+    .target-num { color: var(--amber); font-size: 34px; line-height: 1; }
+    .divider {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-bottom: 1px solid var(--ink);
+      position: relative;
+    }
+    .divider::before { content: "≠"; color: var(--amber); font-size: 27px; }
+    .divider::after {
+      content: "不同分頁";
+      position: absolute;
+      bottom: 17px;
+      writing-mode: vertical-rl;
+      color: var(--muted);
+      font: 10px/1 "DM Mono", monospace;
+      letter-spacing: .1em;
+    }
+
+    select {
+      width: 100%;
+      margin: 12px 0 10px;
+      padding: 10px 32px 10px 10px;
+      border: 1px solid var(--ink);
+      border-radius: 0;
+      color: var(--ink);
+      background: var(--paper-light);
+      font-size: 12px;
+      cursor: pointer;
+    }
+    select:focus, input:focus { outline: 2px solid var(--amber); outline-offset: 2px; }
+    .metadata { margin: 0; min-height: 52px; color: var(--muted); font-size: 13px; line-height: 1.58; }
+    .metadata b { color: var(--ink); font-weight: 500; }
+    .session-stamp { margin-top: 12px; color: var(--muted); font-size: 10px; }
+    .duplicate-note { min-height: 18px; margin: 8px 0 0; color: var(--blocked); font: 11px/1.4 "DM Mono", monospace; }
+
+    .bench {
+      display: grid;
+      grid-template-columns: 1.22fr .78fr;
+      gap: 42px;
+      align-items: start;
+      padding: 16px 0;
+      border-bottom: 1px solid var(--ink);
+    }
+    .shortcut-library-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 9px; }
+    .shortcut-library-head h2 { margin: 0; font-size: 20px; font-weight: 500; letter-spacing: -.025em; }
+    .specimen-label { color: var(--muted); font-size: 11px; text-transform: uppercase; }
+    .shortcut-list { display: grid; gap: 7px; }
+    .shortcut-card {
+      display: grid;
+      grid-template-columns: 38px 1fr auto;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      padding: 10px 12px;
+      color: var(--ink);
+      background: var(--paper-light);
+      border: 1px solid var(--rule);
+      border-radius: 0;
+      cursor: pointer;
+      text-align: left;
+    }
+    .shortcut-card:hover, .shortcut-card.selected { border-color: var(--ink); background: #f7f2e7; }
+    .shortcut-card.selected { box-shadow: 3px 3px 0 var(--amber); }
+    .shortcut-index { color: var(--amber); font: 11px/1 "DM Mono", monospace; }
+    .shortcut-name { font-size: 13px; }
+    .shortcut-chord { font: 12px/1 "DM Mono", monospace; letter-spacing: .06em; }
+    .add-shortcut { display: grid; grid-template-columns: 1fr 1fr auto; gap: 7px; margin-top: 12px; }
+    .add-shortcut input, .shortcut-select {
+      width: 100%;
+      min-width: 0;
+      padding: 10px 9px;
+      color: var(--ink);
+      background: transparent;
+      border: 1px solid var(--rule);
+      border-radius: 0;
+      font: 12px/1.2 "DM Mono", monospace;
+    }
+    .add-shortcut button, .refresh {
+      padding: 10px 11px;
+      border: 1px solid var(--ink);
+      border-radius: 0;
+      color: var(--ink);
+      background: transparent;
+      cursor: pointer;
+      font: 11px/1 "DM Mono", monospace;
+    }
+    .dispatch-area { padding: 2px 0 0; }
+    .dispatch-area h2 { margin: 0 0 7px; font-size: 20px; font-weight: 500; letter-spacing: -.025em; }
+    .dispatch-area p { margin: 0 0 14px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+    .dispatch-choice { margin: 15px 0; }
+    .dispatch-choice label { display: block; margin-bottom: 7px; color: var(--muted); font: 10px/1 "DM Mono", monospace; letter-spacing: .08em; text-transform: uppercase; }
+    .selected-chord { margin-top: 9px !important; color: var(--ink) !important; font: 18px/1.2 "DM Mono", monospace; letter-spacing: .07em; }
+    .execute {
+      width: 100%;
+      padding: 16px 20px;
+      border: 1px solid #61300d;
+      border-radius: 0;
+      color: #fff9ed;
+      background: var(--amber);
+      box-shadow: 3px 3px 0 #61300d;
+      cursor: pointer;
+      font: 13px/1 "DM Mono", monospace;
+      letter-spacing: .1em;
+    }
+    .execute:hover:not(:disabled) { background: #8b470f; }
+    .execute:disabled { cursor: not-allowed; color: #e7c49a; background: #8c704f; box-shadow: none; transform: translate(3px, 3px); }
+
+    .proof {
+      display: grid;
+      grid-template-columns: 178px 1fr;
+      gap: 20px;
+      align-items: start;
+      padding: 17px 0 13px;
+      border-bottom: 1px solid var(--rule);
+    }
+    .proof h2 { margin: 0; font-size: 16px; font-weight: 500; }
+    .proof-caption { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+    .proof-lines { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 22px; }
+    .proof-line { display: flex; justify-content: space-between; gap: 14px; padding-bottom: 5px; border-bottom: 1px dotted var(--rule); font-size: 12px; }
+    .proof-line span:first-child { color: var(--muted); }
+    .proof-line strong { font: 11px/1.35 "DM Mono", monospace; font-weight: 500; text-align: right; }
+    .proof-line .is-live { color: var(--amber); }
+
+    .footer {
+      display: grid;
+      grid-template-columns: 1.22fr .78fr;
+      gap: 42px;
+      padding-top: 16px;
+      align-items: start;
+    }
+    .honesty { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+    .honesty b { color: var(--ink); font-weight: 500; }
+    .outcomes { border-left: 1px solid var(--rule); padding-left: 20px; }
+    .outcomes-title { margin: 0 0 8px; color: var(--muted); font-size: 10px; text-transform: uppercase; }
+    .outcome-list { display: flex; flex-wrap: wrap; gap: 6px 8px; }
+    .outcome {
+      padding: 3px 6px;
+      border: 1px solid var(--rule);
+      color: var(--muted);
+      background: rgba(248,244,235,.35);
+      font: 10px/1.35 "DM Mono", monospace;
+    }
+    .outcome.active { color: var(--amber); border-color: var(--amber); background: var(--amber-soft); }
+    .outcome.error { color: var(--blocked); }
+    .outcome.ok { color: var(--success); }
+
+    @media (max-width: 1180px) {
+      .desk { width: calc(100vw - 48px); }
+      .bench, .footer { gap: 26px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- PROTOTYPE ONLY. Selected direction: a warm calibration desk; the left shortcut library makes reusable choices tangible while the right-side send proof keeps one shared shortcut explicit. -->
+  <main class="desk" aria-label="雙分頁快捷鍵發送原型">
+    <header class="masthead">
+      <div class="eyebrow">發送協定 / session only</div>
+      <h1>Calibration Desk</h1>
+      <div class="right-note mono">本次工作階段<br>重新開啟後必須重選</div>
+    </header>
+
+    <section class="subtitle" aria-label="Session controls">
+      <span>先比對兩個目標，再選一個快捷鍵進行一次受控發送。</span>
+      <button class="refresh" id="refresh" type="button">重新整理 session</button>
+    </section>
+
+    <section class="comparison" aria-label="目標選取">
+      <article class="target target-a">
+        <div class="target-label"><strong>第一目標</strong><span class="target-num">01</span></div>
+        <select id="firstTarget" aria-label="第一目標">
+          <option value="chrome-brief">Chrome · 工作視窗 01 · 「發送簡報 — 草稿」</option>
+          <option value="firefox-audit">Firefox · 研究視窗 02 · 「權限稽核清單」</option>
+          <option value="brave-runbook">Brave · 支援視窗 01 · 「部署 Runbook」</option>
+        </select>
+        <p class="metadata" id="firstMeta"></p>
+        <div class="session-stamp" id="firstStamp">SESSION METADATA · 09:41:18</div>
+      </article>
+
+      <div class="divider" aria-hidden="true"></div>
+
+      <article class="target target-b">
+        <div class="target-label"><strong>第二目標</strong><span class="target-num">02</span></div>
+        <select id="secondTarget" aria-label="第二目標">
+          <option value="firefox-audit">Firefox · 研究視窗 02 · 「權限稽核清單」</option>
+          <option value="chrome-brief">Chrome · 工作視窗 01 · 「發送簡報 — 草稿」</option>
+          <option value="brave-runbook">Brave · 支援視窗 01 · 「部署 Runbook」</option>
+        </select>
+        <p class="metadata" id="secondMeta"></p>
+        <div class="session-stamp" id="secondStamp">SESSION METADATA · 09:41:18</div>
+        <p class="duplicate-note" id="duplicateNote" aria-live="polite"></p>
+      </article>
+    </section>
+
+    <section class="bench" aria-label="快捷鍵庫與發送">
+      <section class="shortcut-library" aria-labelledby="shortcut-library-title">
+        <div class="shortcut-library-head">
+          <h2 id="shortcut-library-title">快捷鍵庫</h2>
+          <span class="specimen-label mono">本機草稿／未持久化</span>
+        </div>
+        <div class="shortcut-list" id="shortcutLibrary" aria-live="polite"></div>
+        <form class="add-shortcut" id="addShortcutForm">
+          <input id="shortcutName" aria-label="快捷鍵名稱" placeholder="名稱，例如：部署確認" />
+          <input id="shortcutValue" aria-label="快捷鍵組合" placeholder="例如：Ctrl + 8" />
+          <button type="submit">新增快捷鍵</button>
+        </form>
+      </section>
+      <section class="dispatch-area" aria-labelledby="send-title">
+        <h2 id="send-title">一次發送，兩個目標</h2>
+        <p>兩個目標必須共用同一個快捷鍵；發送後將進入 60 秒全域冷卻。</p>
+        <div class="dispatch-choice">
+          <label for="shortcutSelect">本次使用的快捷鍵</label>
+          <select class="shortcut-select" id="shortcutSelect" aria-label="本次使用的快捷鍵"></select>
+          <p class="selected-chord" id="selectedChord">—</p>
+        </div>
+        <p id="dispatchDescription">將對兩個不同分頁嘗試發送快捷鍵。</p>
+        <button class="execute" id="execute" type="button">發送快捷鍵</button>
+      </section>
+    </section>
+
+    <section class="proof" aria-label="發送前校對">
+      <div>
+        <h2>發送前校對</h2>
+        <p class="proof-caption">此摘要描述將嘗試的動作，不宣稱送達。</p>
+      </div>
+      <div class="proof-lines">
+        <div class="proof-line"><span>目標配對</span><strong id="proofPair">01 ≠ 02 · 已確認</strong></div>
+        <div class="proof-line"><span>本次快捷鍵</span><strong class="is-live" id="proofChord">—</strong></div>
+        <div class="proof-line"><span>全域冷卻</span><strong id="cooldown">可發送 · 60 秒全域冷卻</strong></div>
+        <div class="proof-line"><span>本次結果</span><strong id="result">待發送</strong></div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <p class="honesty"><b>誠實邊界：</b>此介面只會對已選 Browser Tab 嘗試發送快捷鍵。作業系統權限、前景競態或焦點失敗都可能阻止送達；Tab metadata 只存在於此畫面，並不持久化。</p>
+      <aside class="outcomes" aria-label="代表性結果">
+        <p class="outcomes-title mono">代表性結果</p>
+        <div class="outcome-list">
+          <span class="outcome" data-state="rejected-stale">rejected-stale</span>
+          <span class="outcome error" data-state="permission-blocked">permission-blocked</span>
+          <span class="outcome error" data-state="focus-failed">focus-failed</span>
+          <span class="outcome" data-state="input-attempted">input-attempted</span>
+          <span class="outcome" data-state="partial">partial</span>
+        </div>
+      </aside>
+    </footer>
+  </main>
+
+  <script>
+    const targets = {
+      "chrome-brief": { browser: "Chrome", window: "工作視窗 01", title: "發送簡報 — 草稿", detail: "Tab #18 · 目前回報為可見，但前景權限仍由作業系統決定。" },
+      "firefox-audit": { browser: "Firefox", window: "研究視窗 02", title: "權限稽核清單", detail: "Tab #07 · 僅限本次 session；重新開啟 App 後不會保留。" },
+      "brave-runbook": { browser: "Brave", window: "支援視窗 01", title: "部署 Runbook", detail: "Tab #31 · 發送前仍須確認前景與焦點條件。" }
+    };
+    const shortcuts = [
+      { id: "deploy", name: "部署確認", value: "F8" },
+      { id: "review", name: "審核切換", value: "Ctrl + 8" },
+      { id: "checklist", name: "清單啟動", value: "Ctrl + Shift + K" }
+    ];
+    const first = document.getElementById("firstTarget");
+    const second = document.getElementById("secondTarget");
+    const execute = document.getElementById("execute");
+    const duplicateNote = document.getElementById("duplicateNote");
+    const cooldownNode = document.getElementById("cooldown");
+    const resultNode = document.getElementById("result");
+    const shortcutLibrary = document.getElementById("shortcutLibrary");
+    const shortcutSelect = document.getElementById("shortcutSelect");
+    let selectedShortcutId = "checklist";
+    let cooldownEnd = 0;
+    let tick = null;
+
+    function selectedShortcut() {
+      return shortcuts.find((shortcut) => shortcut.id === selectedShortcutId);
+    }
+
+    function markState(name) {
+      document.querySelectorAll(".outcome").forEach((node) => node.classList.toggle("active", node.dataset.state === name));
+    }
+
+    function renderTargets() {
+      const one = targets[first.value];
+      const two = targets[second.value];
+      document.getElementById("firstMeta").innerHTML = `<b>${one.browser}</b> · ${one.window}<br>「${one.title}」<br>${one.detail}`;
+      document.getElementById("secondMeta").innerHTML = `<b>${two.browser}</b> · ${two.window}<br>「${two.title}」<br>${two.detail}`;
+      const duplicate = first.value === second.value;
+      duplicateNote.textContent = duplicate ? "不可重複：第二目標必須是不同分頁。" : "";
+      document.getElementById("proofPair").textContent = duplicate ? "01 ＝ 02 · 請重選" : "01 ≠ 02 · 已確認";
+      execute.disabled = duplicate || Date.now() < cooldownEnd;
+      if (duplicate) markState("rejected-stale");
+    }
+
+    function renderShortcuts() {
+      const selected = selectedShortcut();
+      shortcutLibrary.innerHTML = shortcuts.map((shortcut, index) => `
+        <button class="shortcut-card ${shortcut.id === selectedShortcutId ? "selected" : ""}" data-shortcut-id="${shortcut.id}" type="button">
+          <span class="shortcut-index">${String(index + 1).padStart(2, "0")}</span>
+          <span class="shortcut-name">${shortcut.name}</span>
+          <span class="shortcut-chord">${shortcut.value}</span>
+        </button>`).join("");
+      shortcutSelect.innerHTML = shortcuts.map((shortcut) => `<option value="${shortcut.id}">${shortcut.name} · ${shortcut.value}</option>`).join("");
+      shortcutSelect.value = selectedShortcutId;
+      document.getElementById("selectedChord").textContent = selected.value;
+      document.getElementById("proofChord").textContent = `${selected.name} · ${selected.value}`;
+      document.getElementById("dispatchDescription").textContent = `將對兩個不同分頁嘗試發送「${selected.name}」的 ${selected.value}。`;
+      shortcutLibrary.querySelectorAll("[data-shortcut-id]").forEach((button) => button.addEventListener("click", () => {
+        selectedShortcutId = button.dataset.shortcutId;
+        renderShortcuts();
+      }));
+    }
+
+    function updateCooldown() {
+      const seconds = Math.max(0, Math.ceil((cooldownEnd - Date.now()) / 1000));
+      if (!seconds) {
+        cooldownNode.textContent = "可發送 · 冷卻結束";
+        execute.disabled = first.value === second.value;
+        if (tick) { clearInterval(tick); tick = null; }
+        return;
+      }
+      cooldownNode.textContent = `已發送 · ${seconds} 秒後可再試`;
+      execute.disabled = true;
+    }
+
+    function stamp() {
+      const now = new Date().toLocaleTimeString("zh-TW", { hour12: false });
+      document.getElementById("firstStamp").textContent = `SESSION METADATA · ${now}`;
+      document.getElementById("secondStamp").textContent = `SESSION METADATA · ${now}`;
+    }
+
+    first.addEventListener("change", renderTargets);
+    second.addEventListener("change", renderTargets);
+    shortcutSelect.addEventListener("change", (event) => {
+      selectedShortcutId = event.target.value;
+      renderShortcuts();
+    });
+    document.getElementById("addShortcutForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const name = document.getElementById("shortcutName").value.trim();
+      const value = document.getElementById("shortcutValue").value.trim();
+      if (!name || !value) {
+        resultNode.textContent = "請填寫快捷鍵名稱與組合";
+        markState("rejected-stale");
+        return;
+      }
+      const id = `custom-${Date.now()}`;
+      shortcuts.push({ id, name, value });
+      selectedShortcutId = id;
+      event.currentTarget.reset();
+      resultNode.textContent = `已新增「${name}」· 尚未發送`;
+      renderShortcuts();
+    });
+    document.getElementById("refresh").addEventListener("click", () => {
+      stamp();
+      resultNode.textContent = "session 已更新 · 請重新校對";
+      markState("rejected-stale");
+      renderTargets();
+    });
+    execute.addEventListener("click", () => {
+      if (first.value === second.value) return;
+      cooldownEnd = Date.now() + 60000;
+      resultNode.textContent = `partial · 「${selectedShortcut().name}」已嘗試發送至 01 / 02 focus-failed`;
+      markState("partial");
+      updateCooldown();
+      tick = setInterval(updateCooldown, 250);
+    });
+
+    renderTargets();
+    renderShortcuts();
+    stamp();
+  </script>
+</body>
+</html>

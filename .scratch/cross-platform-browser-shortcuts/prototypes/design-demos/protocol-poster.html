@@ -1,0 +1,383 @@
+<!doctype html>
+<!-- Direction-board prototype: Protocol Poster. The oversized numerals, rigid rules, and amber control field frame dispatch as one accountable institutional procedure—not a reusable macro. -->
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Protocol Poster — 雙分頁派送</title>
+  <style>
+    :root {
+      --paper: #f4f0e6;
+      --ink: #10100e;
+      --muted: #615f58;
+      --amber: #efad18;
+      --amber-ink: #332100;
+      --rule: #10100e;
+      --fail: #a93823;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { min-height: 100%; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font-family: "Arial Narrow", "Liberation Sans Narrow", "Helvetica Neue", Arial, sans-serif;
+      font-stretch: condensed;
+    }
+
+    button, select, input { font: inherit; }
+
+    .poster {
+      width: min(100%, 1440px);
+      min-height: 900px;
+      margin: 0 auto;
+      padding: 28px 48px 26px;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      background: var(--paper);
+    }
+
+    .eyebrow, .meta, .field-label, .legend, .result-code, .cooldown, .target-meta, .note, .proof-title {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+
+    .masthead {
+      display: grid;
+      grid-template-columns: 1fr 282px;
+      gap: 28px;
+      align-items: end;
+      border-top: 9px solid var(--ink);
+      border-bottom: 2px solid var(--rule);
+      padding: 13px 0 15px;
+    }
+
+    .eyebrow { margin: 0 0 7px; font-size: 12px; font-weight: 700; }
+    h1 { margin: 0; font-size: clamp(42px, 5.2vw, 76px); line-height: .82; letter-spacing: -.065em; font-weight: 900; text-transform: uppercase; }
+    .header-side { display: grid; gap: 8px; text-align: right; }
+    .header-side p { margin: 0; font-size: 12px; line-height: 1.35; }
+    .stamp { display: inline-block; justify-self: end; border: 2px solid var(--ink); padding: 4px 7px; font-weight: 800; font-size: 11px; }
+
+    .procedure { align-self: center; }
+
+    .step {
+      display: grid;
+      grid-template-columns: 142px minmax(0, 1fr);
+      border-bottom: 2px solid var(--rule);
+      min-height: 112px;
+    }
+
+    .step-no {
+      padding: 9px 20px 8px 0;
+      font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+      font-size: 91px;
+      line-height: .75;
+      letter-spacing: -.08em;
+      border-right: 2px solid var(--rule);
+      user-select: none;
+    }
+
+    .step-body { padding: 12px 0 12px 25px; min-width: 0; }
+    .step-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; margin-bottom: 10px; }
+    h2 { margin: 0; font-size: 16px; line-height: 1; letter-spacing: -.02em; text-transform: uppercase; font-weight: 900; }
+    .legend { font-size: 10px; color: var(--muted); white-space: nowrap; }
+
+    .target-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+    .target { border-top: 1px solid var(--ink); padding-top: 7px; }
+    .field-label { display: block; margin-bottom: 5px; font-size: 11px; font-weight: 700; }
+    select, input {
+      width: 100%;
+      min-height: 37px;
+      color: var(--ink);
+      background: transparent;
+      border: 1px solid var(--ink);
+      border-radius: 0;
+      padding: 7px 9px;
+      outline-offset: 3px;
+      font-size: 15px;
+      font-weight: 700;
+    }
+    select:focus, input:focus, button:focus-visible { outline: 3px solid var(--amber); }
+    .target-meta { display: block; margin-top: 5px; font-size: 10px; color: var(--muted); line-height: 1.25; }
+    .duplicate-alert { grid-column: 1 / -1; display: none; margin: 0; color: var(--fail); font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; font-weight: 700; }
+    .duplicate-alert.is-visible { display: block; }
+
+    .chord-layout { display: grid; grid-template-columns: minmax(260px, 395px) 1fr; gap: 25px; align-items: end; }
+    .chord-input { font-family: "SFMono-Regular", Consolas, monospace; font-size: 20px; letter-spacing: .035em; }
+    .instruction { margin: 0 0 7px; max-width: 610px; font-size: 15px; line-height: 1.25; font-weight: 700; }
+
+    .confirmation { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 24px; align-items: end; }
+    .proof-line { border-left: 7px solid var(--amber); padding: 2px 0 2px 14px; }
+    .proof-title { margin: 0 0 4px; font-size: 11px; font-weight: 700; }
+    .proof-copy { margin: 0; font-size: 18px; font-weight: 800; line-height: 1.08; letter-spacing: -.025em; }
+    .execute {
+      min-width: 212px;
+      min-height: 54px;
+      border: 2px solid var(--ink);
+      border-radius: 0;
+      color: var(--ink);
+      background: var(--amber);
+      padding: 10px 17px;
+      cursor: pointer;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 15px;
+      font-weight: 900;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      box-shadow: 5px 5px 0 var(--ink);
+    }
+    .execute:hover { transform: translate(2px, 2px); box-shadow: 3px 3px 0 var(--ink); }
+    .execute:disabled { cursor: not-allowed; color: #69645a; background: #d7c791; box-shadow: none; transform: none; }
+
+    .outcome-band {
+      display: grid;
+      grid-template-columns: 142px minmax(0, 1fr);
+      border-bottom: 9px solid var(--ink);
+      min-height: 125px;
+    }
+    .outcome-label { padding: 12px 20px 10px 0; border-right: 2px solid var(--rule); }
+    .outcome-label h2 { margin-top: 3px; }
+    .outcome-body { padding: 11px 0 10px 25px; }
+    .result-head { display: flex; justify-content: space-between; gap: 18px; align-items: baseline; }
+    .result-code { margin: 0; font-size: 16px; font-weight: 900; }
+    .cooldown { margin: 0; font-size: 11px; font-weight: 700; }
+    .result-message { margin: 5px 0 9px; max-width: 900px; font-size: 15px; line-height: 1.25; font-weight: 700; }
+    .outcome-index { display: flex; flex-wrap: wrap; gap: 7px 18px; font-family: "SFMono-Regular", Consolas, monospace; font-size: 10px; }
+    .outcome-index span { border-top: 1px solid var(--ink); padding-top: 3px; }
+    .outcome-index .active { color: var(--amber-ink); background: var(--amber); padding: 3px 5px 0; margin-top: -3px; }
+
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 30px;
+      padding-top: 10px;
+    }
+    .boundary { max-width: 850px; margin: 0; font-size: 13px; line-height: 1.25; font-weight: 700; }
+    .refresh {
+      border: 0;
+      border-bottom: 2px solid var(--ink);
+      padding: 3px 0;
+      border-radius: 0;
+      color: var(--ink);
+      background: transparent;
+      cursor: pointer;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .refresh:hover { color: var(--amber-ink); background: var(--amber); }
+
+    @media (max-width: 760px) {
+      .poster { min-height: 100vh; padding: 18px; }
+      .masthead, .step, .outcome-band { grid-template-columns: 75px minmax(0, 1fr); }
+      .masthead { grid-template-columns: 1fr; }
+      .header-side { text-align: left; }
+      .stamp { justify-self: start; }
+      .step-no { font-size: 56px; }
+      .step-body, .outcome-body { padding-left: 14px; }
+      .target-grid, .chord-layout, .confirmation { grid-template-columns: 1fr; }
+      .confirmation { gap: 14px; }
+      .execute { width: 100%; }
+      .footer { align-items: flex-start; flex-direction: column; }
+      .legend { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="poster" aria-labelledby="page-title">
+    <header class="masthead">
+      <div>
+        <p class="eyebrow">Coordinated Dispatch / Session-only worksheet</p>
+        <h1 id="page-title">一次派送<br>操作協定</h1>
+      </div>
+      <div class="header-side">
+        <span class="stamp">PROTOCOL / 02 TARGETS</span>
+        <p class="meta">本畫面僅顯示當次 session 的 Tab metadata<br>重新開啟 App 後，必須重新選取。</p>
+      </div>
+    </header>
+
+    <section class="procedure" aria-label="派送操作步驟">
+      <section class="step" aria-labelledby="step-one">
+        <div class="step-no" aria-hidden="true">01</div>
+        <div class="step-body">
+          <div class="step-heading">
+            <h2 id="step-one">指定兩個不同目標</h2>
+            <span class="legend">Connected Browser Tabs</span>
+          </div>
+          <div class="target-grid">
+            <label class="target">
+              <span class="field-label">第一 Target Selection</span>
+              <select id="target-one" aria-label="第一個目標">
+                <option value="chrome-staging">Chrome · Window 01 · 部署控制台 — staging</option>
+                <option value="firefox-checklist">Firefox · Window 02 · 發布清單 — September</option>
+                <option value="brave-review">Brave · Window 03 · 變更審核 — release/42</option>
+              </select>
+              <span class="target-meta" id="meta-one">Chrome / 視窗 01 / Tab「部署控制台 — staging」</span>
+            </label>
+            <label class="target">
+              <span class="field-label">第二 Target Selection</span>
+              <select id="target-two" aria-label="第二個目標">
+                <option value="firefox-checklist">Firefox · Window 02 · 發布清單 — September</option>
+                <option value="chrome-staging">Chrome · Window 01 · 部署控制台 — staging</option>
+                <option value="brave-review">Brave · Window 03 · 變更審核 — release/42</option>
+              </select>
+              <span class="target-meta" id="meta-two">Firefox / 視窗 02 / Tab「發布清單 — September」</span>
+            </label>
+            <p class="duplicate-alert" id="duplicate-alert" role="alert">REJECTED / 兩個目標不可相同。請指定不同的 Browser Tab。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="step" aria-labelledby="step-two">
+        <div class="step-no" aria-hidden="true">02</div>
+        <div class="step-body">
+          <div class="step-heading">
+            <h2 id="step-two">編輯單一 Shortcut Chord</h2>
+            <span class="legend">One chord / no sequence</span>
+          </div>
+          <div class="chord-layout">
+            <label>
+              <span class="field-label">Shortcut Chord</span>
+              <input class="chord-input" id="chord" value="CTRL + SHIFT + P" autocomplete="off" spellcheck="false" aria-describedby="chord-help" />
+            </label>
+            <p class="instruction" id="chord-help">只派送一組按鍵。此協定不記錄巨集、不重播序列，也不把輸入嘗試宣稱為送達。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="step" aria-labelledby="step-three">
+        <div class="step-no" aria-hidden="true">03</div>
+        <div class="step-body">
+          <div class="step-heading">
+            <h2 id="step-three">核對一次嘗試</h2>
+            <span class="legend">Pre-dispatch proof</span>
+          </div>
+          <div class="confirmation">
+            <div class="proof-line">
+              <p class="proof-title">將嘗試輸入</p>
+              <p class="proof-copy" id="proof-copy">CTRL + SHIFT + P → 第一 Target 與第二 Target</p>
+            </div>
+            <button class="execute" id="execute" type="button">執行一次嘗試</button>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <section class="outcome-band" aria-labelledby="outcome-heading" aria-live="polite">
+      <div class="outcome-label">
+        <p class="eyebrow">04 / proof</p>
+        <h2 id="outcome-heading">結果與限制</h2>
+      </div>
+      <div class="outcome-body">
+        <div class="result-head">
+          <p class="result-code" id="result-code">READY / AWAITING EXPLICIT ATTEMPT</p>
+          <p class="cooldown" id="cooldown">APP-WIDE COOLDOWN / READY</p>
+        </div>
+        <p class="result-message" id="result-message">尚未開始。按下執行後，系統只會對兩個已選 Tab 嘗試一次受控輸入。</p>
+        <div class="outcome-index" aria-label="代表性結果狀態">
+          <span>rejected-stale：session 資料已過期</span>
+          <span>permission-blocked：系統權限阻擋</span>
+          <span>focus-failed：前景切換失敗</span>
+          <span class="active" id="attempt-state">input-attempted：已嘗試輸入</span>
+          <span>partial：部分目標完成嘗試</span>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <p class="boundary">誠實邊界：這是一次 best-effort 派送嘗試，不保證 OS 焦點、權限或按鍵送達。每次嘗試後啟動 App-wide 60 秒冷卻，避免重送。</p>
+      <button class="refresh" id="refresh" type="button">重新整理 session 資料</button>
+    </footer>
+  </main>
+
+  <script>
+    (() => {
+      const targets = {
+        'chrome-staging': 'Chrome / 視窗 01 / Tab「部署控制台 — staging」',
+        'firefox-checklist': 'Firefox / 視窗 02 / Tab「發布清單 — September」',
+        'brave-review': 'Brave / 視窗 03 / Tab「變更審核 — release/42」'
+      };
+      const first = document.querySelector('#target-one');
+      const second = document.querySelector('#target-two');
+      const chord = document.querySelector('#chord');
+      const metaOne = document.querySelector('#meta-one');
+      const metaTwo = document.querySelector('#meta-two');
+      const proof = document.querySelector('#proof-copy');
+      const alert = document.querySelector('#duplicate-alert');
+      const execute = document.querySelector('#execute');
+      const refresh = document.querySelector('#refresh');
+      const resultCode = document.querySelector('#result-code');
+      const resultMessage = document.querySelector('#result-message');
+      const cooldown = document.querySelector('#cooldown');
+      const attemptState = document.querySelector('#attempt-state');
+      let remaining = 0;
+      let timer;
+
+      const currentChord = () => chord.value.trim() || '未設定快捷鍵';
+      const updateProof = () => {
+        metaOne.textContent = targets[first.value];
+        metaTwo.textContent = targets[second.value];
+        proof.textContent = `${currentChord()} → 第一 Target 與第二 Target`;
+      };
+      const setOutcome = (code, message, state) => {
+        resultCode.textContent = code;
+        resultMessage.textContent = message;
+        attemptState.textContent = `${state}：${state === 'partial' ? '部分目標完成嘗試' : '已嘗試輸入'}`;
+      };
+      const validateTargets = () => {
+        const duplicate = first.value === second.value;
+        alert.classList.toggle('is-visible', duplicate);
+        execute.disabled = duplicate || remaining > 0;
+        if (duplicate) {
+          setOutcome('REJECTED / DUPLICATE TARGET', '第一與第二 Target 必須是不同的 Browser Tab；這次嘗試未被建立。', 'input-attempted');
+        } else if (remaining === 0 && resultCode.textContent.startsWith('REJECTED')) {
+          setOutcome('READY / AWAITING EXPLICIT ATTEMPT', '尚未開始。按下執行後，系統只會對兩個已選 Tab 嘗試一次受控輸入。', 'input-attempted');
+        }
+        updateProof();
+      };
+      const tick = () => {
+        cooldown.textContent = remaining > 0 ? `APP-WIDE COOLDOWN / ${remaining} 秒` : 'APP-WIDE COOLDOWN / READY';
+        execute.disabled = remaining > 0 || first.value === second.value;
+        if (remaining <= 0) {
+          clearInterval(timer);
+          timer = undefined;
+          return;
+        }
+        remaining -= 1;
+      };
+      const runAttempt = () => {
+        if (execute.disabled) return;
+        remaining = 60;
+        setOutcome('INPUT-ATTEMPTED / CONTROLLED ONCE', `已對「${targets[first.value]}」與「${targets[second.value]}」嘗試輸入 ${currentChord()}。送達結果仍受 OS 焦點與權限影響。`, 'input-attempted');
+        tick();
+        clearInterval(timer);
+        timer = setInterval(tick, 1000);
+        window.setTimeout(() => {
+          if (remaining > 0) setOutcome('PARTIAL / OUTCOME EXAMPLE', '代表性 outcome：第一 Target 已完成輸入嘗試；第二 Target 因前景競態未能確認。冷卻仍持續，不能重送。', 'partial');
+        }, 1400);
+      };
+      const refreshSession = () => {
+        clearInterval(timer);
+        timer = undefined;
+        remaining = 0;
+        first.value = 'chrome-staging';
+        second.value = 'firefox-checklist';
+        setOutcome('SESSION REFRESHED / RESELECT REQUIRED', '已取得當次 session 的範例 metadata。此 prototype 中已顯示預設選取；實際重新開啟 App 時必須重新選取 Tab。', 'input-attempted');
+        tick();
+        validateTargets();
+      };
+
+      [first, second].forEach((target) => target.addEventListener('change', validateTargets));
+      chord.addEventListener('input', updateProof);
+      execute.addEventListener('click', runAttempt);
+      refresh.addEventListener('click', refreshSession);
+      updateProof();
+    })();
+  </script>
+</body>
+</html>

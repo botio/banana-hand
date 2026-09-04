@@ -1,0 +1,17 @@
+{
+  "manifest_version": 2,
+  "name": "Banana Hand Browser Bridge",
+  "version": "0.1.0",
+  "description": "將目前 Firefox profile 的 Browser Tab 回報給 Banana Hand。",
+  "permissions": ["tabs", "storage", "nativeMessaging"],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "bridge@banana-hand.dev",
+      "strict_min_version": "109.0"
+    }
+  },
+  "background": {
+    "scripts": ["background.js"],
+    "persistent": false
+  }
+}

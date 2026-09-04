@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dispatch Console — 雙分頁快捷鍵派送</title>
+  <style>
+    :root {
+      --ink: #181816;
+      --panel: #20201d;
+      --panel-2: #272723;
+      --line: #46463f;
+      --line-soft: #34342f;
+      --paper: #f2efe6;
+      --muted: #a7a398;
+      --dim: #747168;
+      --amber: #d39c52;
+      --amber-pale: #efc987;
+      --danger: #c98570;
+      --rail: 344px;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body {
+      margin: 0;
+      min-width: 1080px;
+      background: var(--ink);
+      color: var(--paper);
+      font-family: "IBM Plex Sans", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+      letter-spacing: .01em;
+    }
+
+    button, input, select { font: inherit; }
+    button { cursor: pointer; }
+
+    .app-shell {
+      display: grid;
+      grid-template-columns: var(--rail) minmax(0, 1fr);
+      min-height: 900px;
+      background: var(--ink);
+    }
+
+    .rail {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      min-height: 900px;
+      padding: 30px 25px 26px;
+      background: #1d1d1a;
+      border-right: 1px solid var(--line);
+    }
+
+    .eyebrow, .mono, .section-label, .meta-label, .step-number, .outcome-code, .rail-footer {
+      font-family: "DM Mono", "SFMono-Regular", Consolas, monospace;
+      letter-spacing: .075em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow { margin: 0 0 9px; color: var(--amber); font-size: 10px; }
+    .rail h1 { margin: 0; font-size: 22px; font-weight: 520; letter-spacing: -.025em; }
+    .rail-deck { margin: 10px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; max-width: 250px; }
+
+    .gate-list { margin-top: 38px; border-top: 1px solid var(--line); }
+    .gate {
+      position: relative;
+      padding: 17px 0 16px 21px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .gate::before {
+      content: "";
+      position: absolute;
+      left: 0; top: 20px;
+      width: 8px; height: 8px;
+      border: 1px solid var(--muted);
+      border-radius: 50%;
+    }
+    .gate.armed::before { background: var(--amber); border-color: var(--amber); box-shadow: 0 0 0 3px rgba(211,156,82,.11); }
+    .gate.blocked::before { border-color: var(--danger); }
+    .gate-name { display: block; color: var(--paper); font-size: 11px; }
+    .gate-state { display: block; margin-top: 7px; color: var(--muted); font-size: 12px; line-height: 1.42; }
+    .gate-state strong { color: var(--amber-pale); font-weight: 500; }
+
+    .cooldown {
+      margin-top: 26px;
+      padding: 17px 17px 18px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+    }
+    .cooldown-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .cooldown h2 { margin: 0; color: var(--muted); font-size: 10px; font-weight: 500; }
+    #cooldown-value { color: var(--paper); font-family: "DM Mono", monospace; font-size: 11px; }
+    .cooldown-bar { height: 2px; margin: 15px 0 11px; background: #45453f; overflow: hidden; }
+    #cooldown-fill { width: 0%; height: 100%; background: var(--amber); transition: width .25s linear; }
+    #cooldown-copy { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+
+    .outcome-monitor { margin-top: 24px; }
+    .section-label { display: block; color: var(--dim); font-size: 10px; font-weight: 500; }
+    .outcome-main { display: flex; align-items: baseline; justify-content: space-between; margin-top: 12px; padding: 12px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    #outcome-code { color: var(--amber-pale); font-size: 12px; }
+    #outcome-note { max-width: 115px; color: var(--muted); font-size: 11px; line-height: 1.35; text-align: right; }
+    .rail-footer { margin-top: auto; padding-top: 25px; color: var(--dim); font-size: 9px; line-height: 1.75; }
+
+    main { min-width: 0; padding: 30px 46px 36px; background: #20201d; }
+    .topline { display: flex; align-items: center; justify-content: space-between; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+    .topline .mono { color: var(--muted); font-size: 10px; }
+    .session-tag { display: inline-flex; align-items: center; gap: 9px; color: var(--muted); font-size: 11px; }
+    .session-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--amber); }
+
+    .canvas-head { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 30px; padding: 42px 0 29px; }
+    .canvas-head h2 { margin: 8px 0 0; font-size: clamp(29px, 3vw, 43px); line-height: 1.08; font-weight: 480; letter-spacing: -.045em; }
+    .canvas-head h2 span { color: var(--muted); }
+    .refresh-button {
+      min-height: 38px; padding: 0 14px; color: var(--paper); background: transparent; border: 1px solid var(--line); font-size: 12px;
+    }
+    .refresh-button:hover { border-color: var(--amber); color: var(--amber-pale); }
+
+    .dispatch-form { max-width: 1010px; }
+    .queue-header { display: grid; grid-template-columns: 95px 1fr 122px; gap: 16px; padding: 0 0 10px; border-bottom: 1px solid var(--line); color: var(--dim); font-size: 10px; }
+    .queue-row {
+      display: grid;
+      grid-template-columns: 95px minmax(0, 1fr) 122px;
+      gap: 16px;
+      align-items: center;
+      min-height: 141px;
+      border-bottom: 1px solid var(--line);
+    }
+    .step-number { color: var(--amber); font-size: 11px; }
+    .step-title { display: block; margin-top: 7px; color: var(--paper); font-size: 15px; font-weight: 500; }
+    .target-control { min-width: 0; }
+    .target-select {
+      width: 100%; height: 43px; padding: 0 13px; color: var(--paper); background: #262622; border: 1px solid var(--line); border-radius: 0; outline: none; font-size: 14px;
+    }
+    .target-select:focus { border-color: var(--amber); box-shadow: inset 3px 0 0 var(--amber); }
+    .target-detail { display: flex; flex-wrap: wrap; gap: 6px 17px; margin-top: 10px; color: var(--muted); font-family: "DM Mono", monospace; font-size: 10px; line-height: 1.5; }
+    .target-detail b { color: var(--paper); font-weight: 400; }
+    .queue-status { color: var(--muted); font-family: "DM Mono", monospace; font-size: 10px; text-align: right; line-height: 1.55; }
+    .queue-status .status-mark { display: block; width: 7px; height: 7px; margin: 0 0 7px auto; border: 1px solid var(--amber); border-radius: 50%; }
+
+    .chord-zone { display: grid; grid-template-columns: 95px minmax(0, 1fr) 122px; gap: 16px; align-items: center; min-height: 127px; border-bottom: 1px solid var(--line); }
+    .chord-input {
+      width: 100%; height: 50px; padding: 0 16px; color: var(--amber-pale); background: transparent; border: 1px solid #706044; outline: none; font-family: "DM Mono", monospace; font-size: 17px; letter-spacing: .04em;
+    }
+    .chord-input:focus { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber); }
+    .chord-hint { margin-top: 9px; color: var(--dim); font-size: 11px; }
+
+    .confirmation {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 30px;
+      align-items: end;
+      padding-top: 28px;
+    }
+    .confirmation-copy { max-width: 590px; }
+    .confirmation-copy h3 { margin: 0; color: var(--paper); font-size: 14px; font-weight: 500; }
+    .confirmation-copy p { margin: 7px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+    .run-button { min-width: 164px; height: 52px; padding: 0 21px; color: #1d1d1a; background: var(--amber); border: 1px solid var(--amber); font-weight: 650; font-size: 14px; }
+    .run-button:hover:not(:disabled) { background: var(--amber-pale); }
+    .run-button:disabled { cursor: not-allowed; color: #797365; background: #393934; border-color: #45453f; }
+
+    .audit-strip { display: grid; grid-template-columns: 175px 1fr; gap: 18px; margin-top: 35px; padding-top: 17px; border-top: 1px solid var(--line); }
+    .audit-strip h3 { margin: 0; color: var(--dim); font-family: "DM Mono", monospace; font-size: 10px; font-weight: 500; letter-spacing: .075em; text-transform: uppercase; }
+    .sample-controls { display: flex; flex-wrap: wrap; gap: 7px; }
+    .sample-button { padding: 7px 9px; color: var(--muted); background: transparent; border: 1px solid var(--line); font-family: "DM Mono", monospace; font-size: 10px; }
+    .sample-button:hover, .sample-button.active { color: var(--amber-pale); border-color: #846438; }
+    .sample-explainer { grid-column: 2; margin: 3px 0 0; color: var(--dim); font-size: 11px; line-height: 1.5; }
+
+    .toast { position: fixed; right: 32px; bottom: 29px; z-index: 5; max-width: 330px; padding: 12px 15px; color: var(--paper); background: #292923; border: 1px solid #856438; font-size: 12px; line-height: 1.45; opacity: 0; transform: translateY(10px); pointer-events: none; transition: opacity .18s, transform .18s; }
+    .toast.visible { opacity: 1; transform: translateY(0); }
+
+    @media (max-width: 1180px) {
+      :root { --rail: 300px; }
+      main { padding-left: 30px; padding-right: 30px; }
+      .queue-header, .queue-row, .chord-zone { grid-template-columns: 78px minmax(0, 1fr) 98px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Throwaway direction-board prototype. Motif rationale: a fixed flight-check rail keeps permission, focus contention, cooldown, and observed outcome in view while the open canvas stages one two-target dispatch queue. -->
+  <div class="app-shell">
+    <aside class="rail" aria-label="Dispatch safeguards">
+      <p class="eyebrow">Local control surface / B</p>
+      <h1>Dispatch<br>Console</h1>
+      <p class="rail-deck">一筆短暫 session 的受控輸入嘗試；不是瀏覽器管理器，也不是巨集工具。</p>
+
+      <section class="gate-list" aria-label="Guard states">
+        <div class="gate armed" id="permission-gate">
+          <span class="gate-name mono">Permission Gate</span>
+          <span class="gate-state">系統輸入權限是前置條件；未授權時會回報 <strong>permission-blocked</strong>。</span>
+        </div>
+        <div class="gate" id="focus-gate">
+          <span class="gate-name mono">Focus Guard</span>
+          <span class="gate-state">執行瞬間才檢查前景目標，競態可能導致 <strong>focus-failed</strong>。</span>
+        </div>
+        <div class="gate" id="session-gate">
+          <span class="gate-name mono">Session Scope</span>
+          <span class="gate-state">Tab metadata 僅供本次畫面使用；重新開啟 App 必須重選。</span>
+        </div>
+      </section>
+
+      <section class="cooldown" aria-labelledby="cooldown-title">
+        <div class="cooldown-head">
+          <h2 id="cooldown-title" class="mono">App-wide cooldown</h2>
+          <span id="cooldown-value">READY</span>
+        </div>
+        <div class="cooldown-bar" aria-hidden="true"><div id="cooldown-fill"></div></div>
+        <p id="cooldown-copy">每次嘗試後啟動 60 秒 App-wide 冷卻；目前可派送。</p>
+      </section>
+
+      <section class="outcome-monitor" aria-live="polite" aria-labelledby="outcome-title">
+        <span id="outcome-title" class="section-label">Observed outcome</span>
+        <div class="outcome-main">
+          <span id="outcome-code" class="outcome-code">AWAITING-INPUT</span>
+          <span id="outcome-note">等待明確確認</span>
+        </div>
+      </section>
+
+      <p class="rail-footer">SESSION-ONLY METADATA<br>NO TARGET PERSISTENCE<br>BEST-EFFORT DISPATCH</p>
+    </aside>
+
+    <main>
+      <header class="topline">
+        <span class="mono">Dispatch / one coordinated attempt</span>
+        <span class="session-tag"><span class="session-dot"></span><span id="session-label">SESSION SNAPSHOT · 4 TABS</span></span>
+      </header>
+
+      <section class="canvas-head" aria-labelledby="dispatch-title">
+        <div>
+          <p class="eyebrow">Queue assembly</p>
+          <h2 id="dispatch-title">選定兩個不同目標，<span>再送出一次嘗試。</span></h2>
+        </div>
+        <button type="button" class="refresh-button" id="refresh-button">重新整理 session</button>
+      </section>
+
+      <form class="dispatch-form" id="dispatch-form">
+        <div class="queue-header mono" aria-hidden="true">
+          <span>Queue slot</span><span>Connected browser target</span><span>Eligibility</span>
+        </div>
+
+        <div class="queue-row">
+          <div><span class="step-number">01 / TARGET</span><span class="step-title">第一目標</span></div>
+          <div class="target-control">
+            <label class="meta-label" for="target-one" style="position:absolute;left:-9999px">第一目標</label>
+            <select class="target-select" id="target-one"></select>
+            <div class="target-detail" id="detail-one"></div>
+          </div>
+          <div class="queue-status"><span class="status-mark"></span><span id="status-one">待確認</span></div>
+        </div>
+
+        <div class="queue-row">
+          <div><span class="step-number">02 / TARGET</span><span class="step-title">第二目標</span></div>
+          <div class="target-control">
+            <label class="meta-label" for="target-two" style="position:absolute;left:-9999px">第二目標</label>
+            <select class="target-select" id="target-two"></select>
+            <div class="target-detail" id="detail-two"></div>
+          </div>
+          <div class="queue-status"><span class="status-mark"></span><span id="status-two">待確認</span></div>
+        </div>
+
+        <div class="chord-zone">
+          <div><span class="step-number">03 / CHORD</span><span class="step-title">快捷鍵</span></div>
+          <div>
+            <label class="meta-label" for="chord-input" style="position:absolute;left:-9999px">可編輯 Shortcut Chord</label>
+            <input id="chord-input" class="chord-input" value="ALT + SHIFT + 2" autocomplete="off" spellcheck="false" aria-describedby="chord-hint">
+            <p class="chord-hint" id="chord-hint">直接編輯 chord；此畫面不攔截鍵盤輸入，也不保證 OS 能送達。</p>
+          </div>
+          <div class="queue-status"><span class="status-mark"></span><span id="chord-status">已定義</span></div>
+        </div>
+
+        <div class="confirmation">
+          <div class="confirmation-copy">
+            <h3>確認後只會進行一次 best-effort 派送。</h3>
+            <p>系統將嘗試把 <span id="confirmation-chord" class="mono">ALT + SHIFT + 2</span> 送往目前佇列中的兩個 Tab。嘗試不代表輸入一定抵達；結果會如實留在左側控制 rail。</p>
+          </div>
+          <button class="run-button" id="run-button" type="submit">執行一次嘗試</button>
+        </div>
+      </form>
+
+      <section class="audit-strip" aria-labelledby="sample-title">
+        <h3 id="sample-title">結果樣本檢視</h3>
+        <div class="sample-controls" role="group" aria-label="Prototype outcome samples">
+          <button type="button" class="sample-button" data-outcome="rejected-stale">rejected-stale</button>
+          <button type="button" class="sample-button" data-outcome="permission-blocked">permission-blocked</button>
+          <button type="button" class="sample-button" data-outcome="focus-failed">focus-failed</button>
+          <button type="button" class="sample-button" data-outcome="input-attempted">input-attempted</button>
+          <button type="button" class="sample-button" data-outcome="partial">partial</button>
+        </div>
+        <p class="sample-explainer">此列僅供 prototype 檢視五種真實回報語意；點選後會更新控制 rail，並不模擬成功送達。</p>
+      </section>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    (() => {
+      const targets = [
+        { id: 'chrome-docs', browser: 'Google Chrome', window: '工作區 A · 視窗 1', title: 'Keyboard shortcuts — Chromium Docs' },
+        { id: 'brave-issue', browser: 'Brave', window: '研究 · 視窗 2', title: 'Issue #418: tab focus race' },
+        { id: 'firefox-local', browser: 'Firefox', window: '本機開發 · 視窗 1', title: 'localhost:5173 / Shortcut harness' },
+        { id: 'chrome-spec', browser: 'Google Chrome', window: '工作區 B · 視窗 3', title: 'Cross-platform input contract' }
+      ];
+      const outcomes = {
+        'rejected-stale': ['REJECTED-STALE', 'session 已過期；請重新整理後重選。'],
+        'permission-blocked': ['PERMISSION-BLOCKED', '系統權限未通過；未嘗試送出輸入。'],
+        'focus-failed': ['FOCUS-FAILED', '目標未能取得前景；未保證輸入抵達。'],
+        'input-attempted': ['INPUT-ATTEMPTED', '已發出一次輸入嘗試；送達未知。'],
+        'partial': ['PARTIAL', '兩個目標的觀察結果不一致；未保證送達。']
+      };
+      const one = document.querySelector('#target-one');
+      const two = document.querySelector('#target-two');
+      const chord = document.querySelector('#chord-input');
+      const run = document.querySelector('#run-button');
+      const refresh = document.querySelector('#refresh-button');
+      const toast = document.querySelector('#toast');
+      const outcomeCode = document.querySelector('#outcome-code');
+      const outcomeNote = document.querySelector('#outcome-note');
+      const cooldownValue = document.querySelector('#cooldown-value');
+      const cooldownFill = document.querySelector('#cooldown-fill');
+      const cooldownCopy = document.querySelector('#cooldown-copy');
+      const focusGate = document.querySelector('#focus-gate');
+      let cooldownEndsAt = 0;
+      let timer;
+
+      function optionText(target) { return `${target.browser}  /  ${target.window}  /  ${target.title}`; }
+      function renderOptions() {
+        [one, two].forEach(select => {
+          const selected = select.value;
+          select.replaceChildren(...targets.map(target => {
+            const option = document.createElement('option');
+            option.value = target.id;
+            option.textContent = optionText(target);
+            return option;
+          }));
+          select.value = selected || (select === one ? targets[0].id : targets[1].id);
+        });
+      }
+      function targetById(id) { return targets.find(target => target.id === id); }
+      function renderDetail(select, detailId, statusId) {
+        const target = targetById(select.value);
+        document.querySelector(detailId).innerHTML = `<span>BROWSER <b>${target.browser}</b></span><span>WINDOW <b>${target.window}</b></span><span>TAB <b>${target.title}</b></span>`;
+        document.querySelector(statusId).textContent = '已列入佇列';
+      }
+      function renderTargets() {
+        renderDetail(one, '#detail-one', '#status-one');
+        renderDetail(two, '#detail-two', '#status-two');
+      }
+      function showToast(message) {
+        toast.textContent = message;
+        toast.classList.add('visible');
+        window.clearTimeout(showToast.timeout);
+        showToast.timeout = window.setTimeout(() => toast.classList.remove('visible'), 2800);
+      }
+      function setOutcome(key) {
+        const [code, note] = outcomes[key];
+        outcomeCode.textContent = code;
+        outcomeNote.textContent = note;
+        document.querySelectorAll('.sample-button').forEach(button => button.classList.toggle('active', button.dataset.outcome === key));
+        focusGate.classList.toggle('blocked', key === 'focus-failed');
+      }
+      function preventDuplicate(changed) {
+        const other = changed === one ? two : one;
+        if (changed.value === other.value) {
+          const replacement = targets.find(target => target.id !== changed.value);
+          other.value = replacement.id;
+          showToast('第二個目標不可與第一個相同；已保留不同的 Tab。');
+        }
+        renderTargets();
+      }
+      function updateChord() {
+        const value = chord.value.trim() || '未定義';
+        document.querySelector('#confirmation-chord').textContent = value;
+        document.querySelector('#chord-status').textContent = value === '未定義' ? '需要 chord' : '已定義';
+        run.disabled = Boolean(cooldownEndsAt) || value === '未定義';
+      }
+      function updateCooldown() {
+        const remaining = Math.max(0, Math.ceil((cooldownEndsAt - Date.now()) / 1000));
+        if (!remaining) {
+          cooldownEndsAt = 0;
+          cooldownValue.textContent = 'READY';
+          cooldownCopy.textContent = '可派送；尚未鎖定下一次嘗試。';
+          cooldownFill.style.width = '0%';
+          window.clearInterval(timer);
+          updateChord();
+          return;
+        }
+        cooldownValue.textContent = `${remaining}s`;
+        cooldownCopy.textContent = 'App-wide 冷卻中；本次嘗試不可重送。';
+        cooldownFill.style.width = `${(remaining / 60) * 100}%`;
+        run.disabled = true;
+      }
+      function beginCooldown() {
+        cooldownEndsAt = Date.now() + 60000;
+        updateCooldown();
+        window.clearInterval(timer);
+        timer = window.setInterval(updateCooldown, 250);
+      }
+
+      renderOptions();
+      renderTargets();
+      updateChord();
+      one.addEventListener('change', () => preventDuplicate(one));
+      two.addEventListener('change', () => preventDuplicate(two));
+      chord.addEventListener('input', updateChord);
+      refresh.addEventListener('click', () => {
+        renderOptions();
+        if (one.value === two.value) two.value = targets[1].id;
+        renderTargets();
+        setOutcome('rejected-stale');
+        document.querySelector('#session-label').textContent = 'SESSION SNAPSHOT · 已更新 · 4 TABS';
+        showToast('Session 已重新整理。此畫面的目標仍只屬於目前 session。');
+      });
+      document.querySelector('#dispatch-form').addEventListener('submit', event => {
+        event.preventDefault();
+        if (cooldownEndsAt) return;
+        setOutcome('input-attempted');
+        showToast('已開始一次 best-effort 輸入嘗試；等待觀察結果。');
+        beginCooldown();
+        window.setTimeout(() => setOutcome('partial'), 1150);
+      });
+      document.querySelectorAll('.sample-button').forEach(button => button.addEventListener('click', () => setOutcome(button.dataset.outcome)));
+    })();
+  </script>
+</body>
+</html>

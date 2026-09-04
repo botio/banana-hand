@@ -1,0 +1,84 @@
+# Cross-platform packaging for Banana Hand.
+#
+# Each job builds NATIVELY on its own OS runner (no cross-compilation), so the
+# `beforeBuildCommand` sidecar build (`npm run bundle-native-host`, which uses the
+# host triple) always lands the native-host binary in the same target dir Tauri
+# consumes for `--target <triple>`. Outputs:
+#   - ubuntu-24.04  -> .deb + .AppImage
+#   - windows-latest -> NSIS installer (.exe)
+#   - macos-latest  -> unsigned, un-notarized DMG
+#
+# macOS has no Apple signing/notarization here, so the DMG is unsigned by design.
+name: Build & Package
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            bundles: "deb,appimage"
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: "nsis"
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            bundles: "dmg"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Tauri v2 on Linux links against webkit2gtk-4.1; ubuntu-24.04 ships it.
+      - name: Install Linux system dependencies
+        if: matrix.os == 'ubuntu-24.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libglib2.0-dev \
+            libssl-dev \
+            pkg-config
+
+      - name: Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+          components: rustfmt
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # Runs `beforeBuildCommand` (native-host sidecar + frontend build), then
+      # bundles only the targets valid for this OS.
+      - name: Build app + native-host sidecar
+        run: npm run tauri -- build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: banana-hand-${{ matrix.os }}
+          path: target/${{ matrix.target }}/release/bundle/**
+          if-no-files-found: error

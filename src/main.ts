@@ -1,0 +1,352 @@
+import { invoke } from "@tauri-apps/api/core";
+
+import type {
+  DispatchOutcome,
+  NativeHostRegistrationResult,
+  RuntimeSnapshot,
+  Settings,
+  ShortcutRecord,
+  TabMetadata,
+} from "./domain";
+import { SettingsRepository } from "./settings";
+import "./styles.css";
+
+const root = document.querySelector<HTMLElement>("#app");
+if (!root) throw new Error("缺少 #app 節點");
+const app: HTMLElement = root;
+
+let settings: Settings = { schemaVersion: 1, shortcuts: [] };
+let snapshot: RuntimeSnapshot = { tabs: [], cooldown_remaining_seconds: 0 };
+let selectedShortcutId: string | undefined;
+let selectedFirstTarget: string | undefined;
+let selectedSecondTarget: string | undefined;
+let repository: SettingsRepository | undefined;
+let statusMessage = "正在連線到桌面協調器…";
+const MODIFIER_NAME_BY_INPUT: Record<string, string> = {
+  ctrl: "Ctrl",
+  alt: "Alt",
+  shift: "Shift",
+  meta: "Meta",
+};
+
+const NAMED_KEY_BY_INPUT: Record<string, string> = {
+  Esc: "Esc",
+  Enter: "Enter",
+  Tab: "Tab",
+  Space: "Space",
+};
+
+
+function targetKey(tab: TabMetadata): string {
+  const target = tab.target;
+  return [
+    target.browser,
+    target.browser_instance_id,
+    target.session_nonce,
+    target.window_id,
+    target.tab_id,
+  ].join(":");
+}
+
+function formatTab(tab: TabMetadata): string {
+  const target = tab.target;
+  return `${target.browser} · 視窗 ${target.window_id} · ${tab.title || `分頁 ${target.tab_id}`}`;
+}
+
+function normalizeChord(raw: string): string {
+  const segments = raw.split("+").map((segment) => segment.trim()).filter(Boolean);
+  if (!segments.length) throw new Error("快捷鍵不可為空白。");
+  const normalized = segments.map((segment, index) => {
+    if (index < segments.length - 1) {
+      const modifier = MODIFIER_NAME_BY_INPUT[segment.toLowerCase()];
+      if (!modifier) throw new Error(`不支援的修飾鍵：${segment}`);
+      return modifier;
+    }
+    if (/^f([1-9]|1\d|2[0-4])$/i.test(segment)) return segment.toUpperCase();
+    if (/^[a-z0-9]$/i.test(segment)) return segment.toUpperCase();
+    if (NAMED_KEY_BY_INPUT[segment]) return NAMED_KEY_BY_INPUT[segment];
+    throw new Error(`不支援的主要按鍵：${segment}`);
+  });
+  if (new Set(normalized.slice(0, -1)).size !== normalized.length - 1) {
+    throw new Error("修飾鍵不可重複。");
+  }
+  return normalized.join("+");
+}
+
+function selectedShortcut(): ShortcutRecord | undefined {
+  return settings.shortcuts.find((shortcut) => shortcut.id === selectedShortcutId);
+}
+
+function selectedTab(key: string | undefined): TabMetadata | undefined {
+  return snapshot.tabs.find((tab) => targetKey(tab) === key);
+}
+
+function canDispatch(): boolean {
+  return Boolean(
+    selectedShortcut()
+      && selectedFirstTarget
+      && selectedSecondTarget
+      && selectedFirstTarget !== selectedSecondTarget
+      && snapshot.cooldown_remaining_seconds === 0,
+  );
+}
+
+function render(): void {
+  app.innerHTML = `
+    <section class="shell" aria-label="Banana Hand 發送協調器">
+      <header class="masthead">
+        <div>
+          <p class="eyebrow">BANANA HAND / DESKTOP COORDINATOR</p>
+          <h1>一次發送，兩個目標。</h1>
+        </div>
+        <p id="connection-status" class="connection-status"></p>
+      </header>
+      <div class="workbench">
+        <section class="panel shortcut-panel" aria-labelledby="shortcut-title">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">PERSISTENT SETTINGS</p>
+              <h2 id="shortcut-title">快捷鍵庫</h2>
+            </div>
+            <span>${settings.shortcuts.length} 個快捷鍵</span>
+          </div>
+          <div id="shortcut-list" class="shortcut-list" role="radiogroup" aria-label="選取本次發送的快捷鍵"></div>
+          <form id="shortcut-form" class="shortcut-form">
+            <label>快捷鍵名稱<input name="name" required maxlength="48" placeholder="例如：部署確認" /></label>
+            <label>快捷鍵組合<input name="chord" required maxlength="32" placeholder="例如：Ctrl+Shift+K" /></label>
+            <button type="submit">新增快捷鍵</button>
+          </form>
+        </section>
+        <section class="panel dispatch-panel" aria-labelledby="dispatch-title">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">SESSION-ONLY TARGETS</p>
+              <h2 id="dispatch-title">發送</h2>
+            </div>
+            <span id="cooldown" class="cooldown"></span>
+          </div>
+          <p class="contract">兩個目標須為不同的已連線 Browser Tab。發送是盡力嘗試，不保證 trusted、原子或送達。</p>
+          <div class="targets">
+            <label>目標 01<select id="first-target"><option value="">重新選擇目標</option></select></label>
+            <label>目標 02<select id="second-target"><option value="">重新選擇目標</option></select></label>
+          </div>
+          <div class="proof" id="proof"></div>
+          <button id="dispatch" class="dispatch-button" type="button">發送快捷鍵</button>
+          <p id="result" class="result" role="status"></p>
+        </section>
+      </div>
+      <section class="panel native-host-panel" aria-labelledby="native-host-title">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">NATIVE MESSAGING HOST</p>
+            <h2 id="native-host-title">讓 Browser 找到 Host</h2>
+          </div>
+        </div>
+        <p class="contract">
+          Browser 透過 native messaging 機制啟動 native host；native host 再經 OS-user IPC
+          連回桌面 App。這裡把 host 登錄到指定 browser（寫入該 browser 的 native-messaging
+          manifest），Chromium 系的 extension id 需填入，Firefox 使用固定 id。
+        </p>
+        <div class="native-host-form">
+          <label>
+            Browser
+            <select id="nh-browser">
+              <option value="chrome">Chrome / Chromium</option>
+              <option value="firefox">Firefox</option>
+            </select>
+          </label>
+          <label>
+            Extension ID（Chromium 系必填）
+            <input id="nh-extension-id" placeholder="例如商店分配的 extension id" />
+          </label>
+          <button id="nh-register" class="dispatch-button" type="button">登錄 native host</button>
+        </div>
+        <p id="nh-result" class="result" role="status"></p>
+      </section>
+    </section>
+  `;
+
+  const connectionStatus = requireElement("#connection-status");
+  connectionStatus.textContent = statusMessage;
+  connectionStatus.classList.toggle("connected", snapshot.tabs.length > 0);
+
+  const list = requireElement("#shortcut-list");
+  if (settings.shortcuts.length === 0) {
+    list.textContent = "尚無快捷鍵。新增後即可選取。";
+    list.classList.add("empty");
+  } else {
+    settings.shortcuts.forEach((shortcut) => {
+      const label = document.createElement("label");
+      label.className = "shortcut-card";
+      const input = document.createElement("input");
+      input.type = "radio";
+      input.name = "shortcut";
+      input.value = shortcut.id;
+      input.checked = shortcut.id === selectedShortcutId;
+      input.addEventListener("change", () => {
+        selectedShortcutId = shortcut.id;
+        render();
+      });
+      const name = document.createElement("strong");
+      name.textContent = shortcut.name;
+      const chord = document.createElement("code");
+      chord.textContent = shortcut.chord;
+      label.append(input, name, chord);
+      list.append(label);
+    });
+  }
+
+  populateTargets("#first-target", selectedFirstTarget, (value) => {
+    selectedFirstTarget = value || undefined;
+    render();
+  });
+  populateTargets("#second-target", selectedSecondTarget, (value) => {
+    selectedSecondTarget = value || undefined;
+    render();
+  });
+
+  const cooldown = requireElement("#cooldown");
+  cooldown.textContent = snapshot.cooldown_remaining_seconds
+    ? `冷卻 ${snapshot.cooldown_remaining_seconds} 秒`
+    : "可發送";
+  const shortcut = selectedShortcut();
+  const firstTarget = selectedTab(selectedFirstTarget);
+  const secondTarget = selectedTab(selectedSecondTarget);
+  requireElement("#proof").textContent = shortcut && firstTarget && secondTarget
+    ? `「${shortcut.name}」${shortcut.chord} → ${formatTab(firstTarget)}、${formatTab(secondTarget)}`
+    : "選取一個快捷鍵與兩個已連線目標後，才可發送。";
+
+  const dispatch = requireElement<HTMLButtonElement>("#dispatch");
+  dispatch.disabled = !canDispatch();
+  dispatch.addEventListener("click", dispatchShortcut);
+  requireElement<HTMLFormElement>("#shortcut-form").addEventListener("submit", addShortcut);
+  requireElement<HTMLButtonElement>("#nh-register").addEventListener("click", registerNativeHost);
+}
+
+function populateTargets(selector: string, selected: string | undefined, onChange: (value: string) => void): void {
+  const select = requireElement<HTMLSelectElement>(selector);
+  snapshot.tabs.forEach((tab) => {
+    const option = document.createElement("option");
+    option.value = targetKey(tab);
+    option.textContent = formatTab(tab);
+    option.selected = option.value === selected;
+    select.append(option);
+  });
+  select.addEventListener("change", () => onChange(select.value));
+}
+
+async function registerNativeHost(): Promise<void> {
+  const browser = requireElement<HTMLSelectElement>("#nh-browser").value as
+    | "chrome"
+    | "firefox";
+  const extensionId = requireElement<HTMLInputElement>("#nh-extension-id").value.trim();
+  const resultEl = requireElement<HTMLElement>("#nh-result");
+  resultEl.textContent = "正在登錄 native host…";
+  try {
+    const result = await invoke<NativeHostRegistrationResult>("register_native_host", {
+      request: {
+        browser,
+        hostPath: null,
+        extensionId: extensionId === "" ? null : extensionId,
+      },
+    });
+    const warning = result.hostExists ? "" : "（注意：native host binary 目前不存在）";
+    resultEl.textContent = `已寫入 ${result.manifestPath}。${result.registryLocation}${warning}`;
+  } catch (error) {
+    resultEl.textContent = `登錄失敗：${String(error)}`;
+  }
+}
+
+async function addShortcut(event: SubmitEvent): Promise<void> {
+  event.preventDefault();
+  const form = event.currentTarget as HTMLFormElement;
+  const values = new FormData(form);
+  try {
+    const chord = normalizeChord(String(values.get("chord") ?? ""));
+    const name = String(values.get("name") ?? "").trim();
+    if (!name) throw new Error("快捷鍵名稱不可為空白。");
+    if (!repository) throw new Error("持久化設定尚未可用。");
+    const shortcut = { id: crypto.randomUUID(), name, chord, order: settings.shortcuts.length };
+    settings = await repository.replaceShortcuts([...settings.shortcuts, shortcut]);
+    selectedShortcutId = shortcut.id;
+    statusMessage = `已儲存「${name}」。`;
+    render();
+  } catch (error) {
+    statusMessage = error instanceof Error ? error.message : "無法新增快捷鍵。";
+    render();
+  }
+}
+
+async function dispatchShortcut(): Promise<void> {
+  const shortcut = selectedShortcut();
+  const firstTarget = selectedTab(selectedFirstTarget);
+  const secondTarget = selectedTab(selectedSecondTarget);
+  if (!shortcut || !firstTarget || !secondTarget) return;
+
+  const result = requireElement("#result");
+  result.textContent = "正在要求 native host 驗證兩個目標…";
+  try {
+    const outcome = await invoke<DispatchOutcome>("request_dispatch", {
+      request: {
+        request_id: crypto.randomUUID(),
+        shortcut: {
+          ...shortcut,
+          chord: parseChord(shortcut.chord),
+        },
+        first_target: firstTarget.target,
+        second_target: secondTarget.target,
+      },
+    });
+    result.textContent = formatOutcome(outcome);
+    await refreshRuntime();
+  } catch (error) {
+    result.textContent = error instanceof Error ? error.message : "發送請求失敗。";
+  }
+}
+
+function parseChord(chord: string): { modifiers: string[]; key: Record<string, unknown> } {
+  const segments = chord.split("+");
+  const main = segments.at(-1)!;
+  const modifiers = segments.slice(0, -1).map((modifier) => modifier.toLowerCase());
+  if (/^F\d+$/.test(main)) return { modifiers, key: { function: Number(main.slice(1)) } };
+  if (main.length === 1) return { modifiers, key: { character: main } };
+  return { modifiers, key: { [main === "Esc" ? "escape" : main.toLowerCase()]: null } };
+}
+
+function formatOutcome(outcome: DispatchOutcome): string {
+  if ("rejected" in outcome) return `已拒絕：${outcome.rejected.reason}`;
+  if ("partial" in outcome) return "partial：部分目標已嘗試；請查看各目標結果。";
+  return "已嘗試發送；此結果不代表快捷鍵已送達。";
+}
+
+async function refreshRuntime(): Promise<void> {
+  try {
+    snapshot = await invoke<RuntimeSnapshot>("runtime_snapshot");
+    statusMessage = snapshot.tabs.length
+      ? `已連線 ${snapshot.tabs.length} 個可選 Browser Tab。`
+      : "尚無已連線 Browser Tab；安裝 extension 後重新選擇目標。";
+  } catch {
+    statusMessage = "此網頁預覽未連接 Tauri 桌面協調器；啟動 App 後才可讀取 Browser Tab。";
+  }
+  render();
+}
+
+function requireElement<T extends Element = HTMLElement>(selector: string): T {
+  const element = app.querySelector<T>(selector);
+  if (!element) throw new Error(`缺少必要介面元素：${selector}`);
+  return element;
+}
+
+async function bootstrap(): Promise<void> {
+  try {
+    repository = await SettingsRepository.open();
+    settings = await repository.read();
+    selectedShortcutId = settings.shortcuts.at(0)?.id;
+  } catch (error) {
+    statusMessage = error instanceof Error ? error.message : "持久化設定不可用。";
+  }
+  await refreshRuntime();
+  window.setInterval(() => void refreshRuntime(), 1_000);
+}
+
+void bootstrap();

@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Banana Hand Browser Bridge",
+  "version": "0.1.0",
+  "description": "將目前 Chromium profile 的 Browser Tab 回報給 Banana Hand。",
+  "permissions": ["tabs", "storage", "nativeMessaging"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  }
+}
