@@ -22,18 +22,13 @@ Banana Hand 讓「一個快捷鍵」同時對兩個瀏覽器分頁做動作。�
 從最新的 [GitHub Preview Release](https://github.com/botio/banana-hand/releases) 下載符合
 作業系統的 desktop asset：
 - **Windows**：執行 NSIS `.exe` 安裝程式。
-- **macOS（目前僅 Apple Silicon）**：只下載檔名含 `_aarch64.dmg` 的 Preview asset；**Intel Mac 不相容，請勿嘗試繞過 Gatekeeper**。在 Apple Silicon 上，先把 `Banana Hand.app` 拖到「應用程式」，再依序嘗試：
-  1. 於 Finder 對 `Banana Hand.app` 按住 Control 點擊（或右鍵）→「開啟」→ 再按一次「開啟」；這是比「Open Anyway」更可靠的單一 app Gatekeeper 放行路徑。
-  2. 若系統設定「隱私權與安全性」顯示「仍要開啟」，可改按它。
-  3. 只有在彈窗是「無法驗證開發者」時才適用上述流程；若顯示「已毀損」或「無法在此 Mac 上開啟」，停止並回報完整訊息，勿以移除 quarantine 屬性繞過。
-  App 成功啟動後，再授予「輔助功能」權限。
+- **macOS（僅 Apple Silicon）**：只下載 release note 明示為「signed and notarized」的 `_aarch64.dmg`。`v0.1.0` 的未 notarize DMG 已撤下，因為 macOS 會把它判為「已毀損」；不要移除 quarantine 屬性繞過此警告。發行流程完成 Developer ID signing 與 Apple notarization 後，app 應可正常開啟；若仍失敗，請回報完整彈窗文字。
 - **Linux**：安裝 `.deb`（或使用 AppImage）。
 
-### 第 2 步：加入瀏覽器插件
 > App 靠「瀏覽器插件」看得到你的分頁。Preview Release 附帶 Chrome 的
-> `banana-hand-chromium-<版本>.zip` 與 Firefox 的
-> `banana-hand-firefox-<版本>.xpi`。插件尚未上架商店：Chrome 仍以「未封裝」方式
-> 載入解壓後的資料夾；Firefox 的未簽名 `.xpi` 只有 Firefox Developer Edition／Nightly／ESR 裝得到。正式發行經 AMO 簽名後，任何 Firefox 都能直接裝。
+> `banana-hand-chromium-<版本>.zip` 與 AMO unlisted-signed Firefox
+> `banana-hand-firefox-<版本>.xpi`。Chrome 仍以「未封裝」方式載入解壓後的資料夾；
+> `v0.1.0` 的 unsigned Firefox XPI 已撤下，因為標準 Firefox 必然拒絕它。
 
 **Chrome**
 1. 從同版本 Preview Release 下載 `banana-hand-chromium-<版本>.zip` 並解壓。
@@ -43,10 +38,11 @@ Banana Hand 讓「一個快捷鍵」同時對兩個瀏覽器分頁做動作。�
 5. 清單出現「Banana Hand Browser Bridge」即成功。
 
 **Firefox**
-1. 從同版本 Preview Release 下載 `banana-hand-firefox-<版本>.xpi`；本機開發可改跑 `npm run package-firefox-extension`。
-2. （未簽名才需要）用 **Firefox Developer Edition／Nightly／ESR**，到 `about:config` 把 `xpinstall.signatures.required` 設成 `false`。
-3. 地址列輸入 `about:addons` → 右上齒輪 →「安裝附加元件…」→ 選第 1 步的 `.xpi`。
-4. 出現「Banana Hand Browser Bridge」即成功。
+1. 從 release note 明示為「AMO-signed」的 Preview Release 下載 `banana-hand-firefox-<版本>.xpi`。
+2. 地址列輸入 `about:addons` → 右上齒輪 →「安裝附加元件…」→ 選第 1 步的 `.xpi`。
+3. 出現「Banana Hand Browser Bridge」即成功。
+
+> 本機開發才可跑 `npm run package-firefox-extension` 產生 unsigned XPI，並只以 Firefox Developer Edition／Nightly／ESR 測試；它不是給一般 Firefox 使用者的發行產物。
 
 ### 第 3 步：讓 Browser 找到 Host
 1. 開啟 Banana Hand，到「讓 Browser 找到 Host」面板。

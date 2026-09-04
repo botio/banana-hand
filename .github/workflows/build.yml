@@ -68,12 +68,36 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Prepare macOS signing and notarization credentials
+        if: matrix.target == 'aarch64-apple-darwin'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          test -n "${APPLE_CERTIFICATE}"
+          test -n "${APPLE_CERTIFICATE_PASSWORD}"
+          test -n "${APPLE_API_KEY}"
+          test -n "${APPLE_API_ISSUER}"
+          test -n "${APPLE_API_KEY_P8}"
+          install -d -m 700 private_keys
+          printf '%s' "${APPLE_API_KEY_P8}" > "private_keys/AuthKey_${APPLE_API_KEY}.p8"
+          chmod 600 "private_keys/AuthKey_${APPLE_API_KEY}.p8"
+
       - name: Install frontend dependencies
         run: npm ci
 
       # Runs `beforeBuildCommand` (native-host sidecar + frontend build), then
       # bundles only the targets valid for this OS.
       - name: Build app + native-host sidecar
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_PATH: ${{ github.workspace }}/private_keys/AuthKey_${{ secrets.APPLE_API_KEY }}.p8
         run: npm run tauri -- build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
 
       - name: Upload artifacts
@@ -99,10 +123,20 @@ jobs:
         with:
           node-version: 22
 
-      - name: Package browser extensions
+      - name: Install release tooling
+        run: npm ci
+
+      - name: Package Chrome extension
+        run: node scripts/package-chromium-extension.mjs
+
+      - name: Sign Firefox extension through AMO
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
         run: |
-          node scripts/package-chromium-extension.mjs
-          node scripts/package-firefox-extension.mjs
+          test -n "${WEB_EXT_API_KEY}"
+          test -n "${WEB_EXT_API_SECRET}"
+          npm run sign-firefox-extension
 
       - name: Download desktop artifacts
         uses: actions/download-artifact@v4
@@ -113,7 +147,10 @@ jobs:
         run: |
           mkdir -p release-assets/browser-extensions
           cp dist/chromium-extension/*.zip release-assets/browser-extensions/
-          cp dist/firefox-extension/*.xpi release-assets/browser-extensions/
+          set -- dist/firefox-extension/*.xpi
+          test "$#" -eq 1
+          test -f "$1"
+          cp "$1" release-assets/browser-extensions/
 
       - name: Publish GitHub preview release
         env:
@@ -124,7 +161,7 @@ jobs:
             -o -name '*.zip' -o -name '*.xpi' \
           \) -print0)
           test "${#assets[@]}" -gt 0
-          notes=$'Preview release only: build artifacts are attached, but this release does not claim a supported platform/browser pair. See docs/adr/0003-release-evidence-matrix.md for the required 24-cell real-device evidence matrix.\n\nThe macOS DMG targets Apple Silicon only (aarch64). On a compatible Mac, use Finder Control-click → Open if System Settings does not show Open Anyway; do not bypass an incompatible or damaged-app alert.\n\nFirefox XPI is unsigned: it installs only in Firefox Developer Edition, Nightly, or ESR with signature enforcement disabled until AMO signing is available.'
+          notes=$'Preview release only: build artifacts are attached, but this release does not claim a supported platform/browser pair. See docs/adr/0003-release-evidence-matrix.md for the required 24-cell real-device evidence matrix.\n\nThe macOS DMG is signed and notarized for Apple Silicon (aarch64). If macOS reports that an app is damaged, do not bypass it; report the exact message.\n\nThe Firefox XPI is AMO-signed through the unlisted channel and installs in release-channel Firefox.'
           if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             gh release edit "${GITHUB_REF_NAME}" \
               --repo "${GITHUB_REPOSITORY}" \
