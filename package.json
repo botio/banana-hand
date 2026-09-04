@@ -10,6 +10,7 @@
     "bundle-native-host": "node scripts/bundle-native-host.mjs",
     "package-chromium-extension": "node scripts/package-chromium-extension.mjs",
     "package-firefox-extension": "node scripts/package-firefox-extension.mjs",
+    "package-firefox-temporary-extension": "node scripts/package-firefox-temporary-extension.mjs",
     "sign-firefox-extension": "web-ext sign --channel=unlisted --source-dir=extensions/firefox --artifacts-dir=dist/firefox-extension",
     "tauri": "tauri"
   },

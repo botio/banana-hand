@@ -31,9 +31,9 @@ Banana Hand 讓「一個快捷鍵」同時對兩個瀏覽器分頁做動作。�
 - **Linux**：安裝 `.deb`（或使用 AppImage）。
 
 > App 靠「瀏覽器插件」看得到你的分頁。Preview Release 附帶 Chrome 的
-> `banana-hand-chromium-<版本>.zip` 與 AMO unlisted-signed Firefox
-> `banana-hand-firefox-<版本>.xpi`。Chrome 仍以「未封裝」方式載入解壓後的資料夾；
-> `v0.1.0` 的 unsigned Firefox XPI 已撤下，因為標準 Firefox 必然拒絕它。
+> `banana-hand-chromium-<版本>.zip`，以及可在標準 Firefox 暫時載入的
+> `banana-hand-firefox-temporary-<版本>.zip`。AMO unlisted-signed
+> `banana-hand-firefox-<版本>.xpi` 只會在 release note 明示為「AMO-signed」時附帶。
 
 **Chrome**
 1. 從同版本 Preview Release 下載 `banana-hand-chromium-<版本>.zip` 並解壓。
@@ -42,12 +42,13 @@ Banana Hand 讓「一個快捷鍵」同時對兩個瀏覽器分頁做動作。�
 4. 按「載入未封裝的擴充功能」，選擇解壓後、含 `manifest.json` 的資料夾。
 5. 清單出現「Banana Hand Browser Bridge」即成功。
 
-**Firefox**
-1. 從 release note 明示為「AMO-signed」的 Preview Release 下載 `banana-hand-firefox-<版本>.xpi`。
-2. 地址列輸入 `about:addons` → 右上齒輪 →「安裝附加元件…」→ 選第 1 步的 `.xpi`。
-3. 出現「Banana Hand Browser Bridge」即成功。
+**Firefox（目前可用的暫時載入）**
+1. 從同版本 Preview Release 下載 `banana-hand-firefox-temporary-<版本>.zip` 並解壓。
+2. 地址列輸入 `about:debugging#/runtime/this-firefox`，按 Enter。
+3. 按「載入暫用附加元件…」（Load Temporary Add-on…），選擇解壓資料夾中的 `manifest.json`。
+4. 清單出現「Banana Hand Browser Bridge」即成功；Firefox 每次重新啟動後要重做第 2–3 步。
 
-> 本機開發才可跑 `npm run package-firefox-extension` 產生 unsigned XPI，並只以 Firefox Developer Edition／Nightly／ESR 測試；它不是給一般 Firefox 使用者的發行產物。
+> 若 release note 明示存在「AMO-signed」的 `.xpi`，可改到 `about:addons` → 右上齒輪 →「安裝附加元件…」永久安裝。未簽署 `.xpi` 不能在標準 Firefox 安裝。
 
 ### 第 3 步：讓 Browser 找到 Host
 1. 開啟 Banana Hand，到「讓 Browser 找到 Host」面板。

@@ -105,6 +105,9 @@ jobs:
 
       - name: Package Chrome extension
         run: node scripts/package-chromium-extension.mjs
+      - name: Package Firefox temporary extension
+        run: node scripts/package-firefox-temporary-extension.mjs
+
 
       - name: Sign Firefox extension through AMO
         env:
@@ -124,6 +127,7 @@ jobs:
         run: |
           mkdir -p release-assets/browser-extensions
           cp dist/chromium-extension/*.zip release-assets/browser-extensions/
+          cp dist/firefox-temporary-extension/*.zip release-assets/browser-extensions/
           set -- dist/firefox-extension/*.xpi
           test "$#" -eq 1
           test -f "$1"
