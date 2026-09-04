@@ -134,9 +134,11 @@ jobs:
           WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
           WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
         run: |
-          test -n "${WEB_EXT_API_KEY}"
-          test -n "${WEB_EXT_API_SECRET}"
-          npm run sign-firefox-extension
+          if [ -n "${WEB_EXT_API_KEY}" ] && [ -n "${WEB_EXT_API_SECRET}" ]; then
+            npm run sign-firefox-extension
+          else
+            echo "AMO_JWT_ISSUER/AMO_JWT_SECRET not set; skipping AMO signing. The Firefox temporary ZIP is still published."
+          fi
 
       - name: Download desktop artifacts
         uses: actions/download-artifact@v4
@@ -148,10 +150,11 @@ jobs:
           mkdir -p release-assets/browser-extensions
           cp dist/chromium-extension/*.zip release-assets/browser-extensions/
           cp dist/firefox-temporary-extension/*.zip release-assets/browser-extensions/
-          set -- dist/firefox-extension/*.xpi
-          test "$#" -eq 1
-          test -f "$1"
-          cp "$1" release-assets/browser-extensions/
+          if ls dist/firefox-extension/*.xpi >/dev/null 2>&1; then
+            cp dist/firefox-extension/*.xpi release-assets/browser-extensions/
+          else
+            echo "No AMO-signed XPI present; skipping XPI staging."
+          fi
 
       - name: Publish GitHub preview release
         env:
@@ -162,7 +165,7 @@ jobs:
             -o -name '*.zip' -o -name '*.xpi' \
           \) -print0)
           test "${#assets[@]}" -gt 0
-          notes=$'Preview release only: build artifacts are attached, but this release does not claim a supported platform/browser pair. See docs/adr/0003-release-evidence-matrix.md for the required 24-cell real-device evidence matrix.\n\nThe macOS DMG targets Apple Silicon (aarch64) and is unsigned. If a trusted download from this repository is reported as damaged, follow the README command to remove only its com.apple.quarantine attribute; do not do this for an altered or untrusted app.\n\nThe Firefox XPI is AMO-signed through the unlisted channel and installs in release-channel Firefox.'
+          notes=$'Preview release only: build artifacts are attached, but this release does not claim a supported platform/browser pair. See docs/adr/0003-release-evidence-matrix.md for the required 24-cell real-device evidence matrix.\n\nmacOS (Apple Silicon): the DMG is ad-hoc signed but not notarized (no Apple Developer ID). To open it for the first time, launch the app; when Gatekeeper reports an unidentified developer, choose Done, then open System Settings > Privacy & Security and click Open Anyway. Do not use xattr quarantine removal.\n\nChromium: the extension uses a fixed ID (mooakjhlbkjfbmbmliklkmfmacnomlai) so the native host registers automatically; no manual extension-ID entry is needed.\n\nFirefox: use the temporary ZIP via about:debugging > Load Temporary Add-on (unloads on restart). An AMO-signed XPI (unlisted channel) is attached only when AMO signing secrets are configured.'
           if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             gh release edit "${GITHUB_REF_NAME}" \
               --repo "${GITHUB_REPOSITORY}" \
