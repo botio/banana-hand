@@ -119,13 +119,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mapfile -d '' assets < <(find release-assets -type f -print0)
+          mapfile -d '' assets < <(find release-assets -type f \( \
+            -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' -o -name '*.exe' \
+            -o -name '*.zip' -o -name '*.xpi' \
+          \) -print0)
           test "${#assets[@]}" -gt 0
           notes=$'Preview release only: build artifacts are attached, but this release does not claim a supported platform/browser pair. See docs/adr/0003-release-evidence-matrix.md for the required 24-cell real-device evidence matrix.\n\nFirefox XPI is unsigned: it installs only in Firefox Developer Edition, Nightly, or ESR with signature enforcement disabled until AMO signing is available.'
           if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            gh release upload "${GITHUB_REF_NAME}" "${assets[@]}" --repo "${GITHUB_REPOSITORY}" --clobber
+            gh release edit "${GITHUB_REF_NAME}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --draft=false \
+              --prerelease \
+              --latest=false \
+              --title "Banana Hand ${GITHUB_REF_NAME} (Preview)" \
+              --notes "${notes}"
           else
-            gh release create "${GITHUB_REF_NAME}" "${assets[@]}" \
+            gh release create "${GITHUB_REF_NAME}" \
               --repo "${GITHUB_REPOSITORY}" \
               --verify-tag \
               --prerelease \
@@ -134,3 +143,6 @@ jobs:
               --notes "${notes}" \
               --generate-notes
           fi
+          gh release upload "${GITHUB_REF_NAME}" "${assets[@]}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --clobber
