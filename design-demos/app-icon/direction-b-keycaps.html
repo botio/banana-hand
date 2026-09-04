@@ -1,0 +1,104 @@
+<!doctype html>
+<!-- form comes from: 使用者指定「兩個鍵帽中間夾著一根香蕉」；以一個 shortcut 被兩個目標夾住的產品行為轉成實體接觸關係。 -->
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root { --yellow:#FFCF2E; --green:#1E5B3A; --ink:#0F2E1E; --cream:#FFF4D6; --amber:#F59E0B; --stem:#8A5A2B; }
+  html, body { width:1024px; height:1024px; margin:0; overflow:hidden; background:transparent; }
+  body { isolation:isolate; }
+  .icon { width:1024px; height:1024px; display:block; }
+</style>
+</head>
+<body>
+<svg class="icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-label="兩個深綠鍵帽夾著一根香蕉的 Banana Hand 應用程式圖示">
+  <defs>
+    <!-- all rendered colors derive only from the approved palette -->
+    <linearGradient id="tile" x1=".12" y1=".05" x2=".86" y2="1">
+      <stop offset="0" stop-color="#FFF4D6"/><stop offset=".62" stop-color="#FFF4D6"/><stop offset=".91" stop-color="#FFCF2E"/><stop offset="1" stop-color="#F59E0B"/>
+    </linearGradient>
+    <radialGradient id="tileLight" cx="25%" cy="13%" r="90%">
+      <stop offset="0" stop-color="#FFF4D6" stop-opacity=".88"/><stop offset=".42" stop-color="#FFF4D6" stop-opacity=".18"/><stop offset="1" stop-color="#8A5A2B" stop-opacity=".15"/>
+    </radialGradient>
+    <linearGradient id="capTop" x1=".08" y1="0" x2=".92" y2="1">
+      <stop offset="0" stop-color="#1E5B3A"/><stop offset=".36" stop-color="#0F2E1E"/><stop offset="1" stop-color="#0F2E1E"/>
+    </linearGradient>
+    <linearGradient id="capSide" x1="0" y1="0" x2=".9" y2="1">
+      <stop offset="0" stop-color="#1E5B3A"/><stop offset=".5" stop-color="#0F2E1E"/><stop offset="1" stop-color="#0F2E1E"/>
+    </linearGradient>
+    <linearGradient id="bevel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFF4D6" stop-opacity=".46"/><stop offset=".3" stop-color="#FFF4D6" stop-opacity=".08"/><stop offset=".55" stop-color="#0F2E1E" stop-opacity=".08"/><stop offset="1" stop-color="#0F2E1E" stop-opacity=".58"/>
+    </linearGradient>
+    <linearGradient id="banana" x1=".05" y1=".04" x2=".95" y2=".94">
+      <stop offset="0" stop-color="#FFF4D6"/><stop offset=".12" stop-color="#FFCF2E"/><stop offset=".53" stop-color="#FFCF2E"/><stop offset=".83" stop-color="#F59E0B"/><stop offset="1" stop-color="#8A5A2B"/>
+    </linearGradient>
+    <linearGradient id="bananaShade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#8A5A2B" stop-opacity=".5"/><stop offset=".28" stop-color="#F59E0B" stop-opacity=".12"/><stop offset=".58" stop-color="#FFF4D6" stop-opacity=".55"/><stop offset="1" stop-color="#8A5A2B" stop-opacity=".48"/>
+    </linearGradient>
+    <linearGradient id="stem" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFF4D6"/><stop offset=".17" stop-color="#8A5A2B"/><stop offset=".75" stop-color="#8A5A2B"/><stop offset="1" stop-color="#0F2E1E"/>
+    </linearGradient>
+    <filter id="tileShadow" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="24" stdDeviation="22" flood-color="#0F2E1E" flood-opacity=".32"/></filter>
+    <filter id="capShadow" x="-35%" y="-25%" width="180%" height="180%"><feDropShadow dx="0" dy="29" stdDeviation="20" flood-color="#0F2E1E" flood-opacity=".43"/></filter>
+    <filter id="bananaShadow" x="-40%" y="-25%" width="180%" height="180%"><feDropShadow dx="5" dy="16" stdDeviation="9" flood-color="#0F2E1E" flood-opacity=".38"/></filter>
+    <filter id="soft"><feGaussianBlur stdDeviation="11"/></filter>
+    <clipPath id="tileClip"><rect x="70" y="70" width="884" height="884" rx="230"/></clipPath>
+  </defs>
+
+  <rect x="70" y="70" width="884" height="884" rx="230" fill="url(#tile)" filter="url(#tileShadow)"/>
+  <g clip-path="url(#tileClip)">
+    <rect x="70" y="70" width="884" height="884" fill="url(#tileLight)"/>
+    <path d="M89 708C224 646 275 850 391 865c142 19 214-148 350-112 99 26 121 146 202 88V954H70V750Z" fill="#8A5A2B" opacity=".10"/>
+    <ellipse cx="300" cy="767" rx="182" ry="43" fill="#0F2E1E" opacity=".16" filter="url(#soft)"/>
+    <ellipse cx="724" cy="767" rx="182" ry="43" fill="#0F2E1E" opacity=".16" filter="url(#soft)"/>
+
+    <!-- Precision keycap left: lower wall first, top shell and the continuous bevel highlight. -->
+    <g filter="url(#capShadow)">
+      <path d="M126 354Q126 319 161 319H386Q421 319 421 354V697Q421 724 398 740L367 762H159Q126 744 126 710Z" fill="url(#capSide)"/>
+      <path d="M126 689Q126 723 159 742H367L398 721Q421 705 421 675V699Q421 727 398 743L367 765H159Q126 747 126 713Z" fill="#0F2E1E" opacity=".68"/>
+      <rect x="126" y="286" width="295" height="426" rx="51" fill="url(#capTop)"/>
+      <rect x="139" y="299" width="269" height="400" rx="41" fill="none" stroke="url(#bevel)" stroke-width="13"/>
+      <path d="M164 315H374Q398 315 400 340V420C337 397 205 398 147 429V340Q148 315 164 315Z" fill="#FFF4D6" opacity=".075"/>
+      <path d="M159 661Q159 677 175 677H372Q389 677 389 660" fill="none" stroke="#0F2E1E" stroke-opacity=".62" stroke-width="7" stroke-linecap="round"/>
+      <ellipse cx="274" cy="460" rx="84" ry="20" fill="#FFF4D6" opacity=".045"/>
+    </g>
+
+    <!-- right keycap mirrors the engineered shell, preserving a deliberate 174px key gap. -->
+    <g filter="url(#capShadow)">
+      <path d="M603 354Q603 319 638 319H863Q898 319 898 354V710Q898 744 865 762H657L626 740Q603 724 603 697Z" fill="url(#capSide)"/>
+      <path d="M603 675Q603 705 626 721L657 742H865Q898 723 898 689V713Q898 747 865 765H657L626 743Q603 727 603 699Z" fill="#0F2E1E" opacity=".68"/>
+      <rect x="603" y="286" width="295" height="426" rx="51" fill="url(#capTop)"/>
+      <rect x="616" y="299" width="269" height="400" rx="41" fill="none" stroke="url(#bevel)" stroke-width="13"/>
+      <path d="M650 315H860Q876 315 877 340V429C819 398 687 397 624 420V340Q626 315 650 315Z" fill="#FFF4D6" opacity=".075"/>
+      <path d="M635 660Q635 677 652 677H849Q865 677 865 661" fill="none" stroke="#0F2E1E" stroke-opacity=".62" stroke-width="7" stroke-linecap="round"/>
+      <ellipse cx="750" cy="460" rx="84" ry="20" fill="#FFF4D6" opacity=".045"/>
+    </g>
+
+    <!-- Ambient-occlusion crescents: the keys physically squeeze the fruit rather than merely sit behind it. -->
+    <path d="M431 357C457 375 465 409 457 454C446 516 446 611 429 663C421 686 423 710 436 731" fill="none" stroke="#0F2E1E" stroke-width="23" stroke-linecap="round" opacity=".45" filter="url(#soft)"/>
+    <path d="M591 357C566 380 557 412 565 456C576 520 575 612 593 663C601 687 599 710 587 731" fill="none" stroke="#0F2E1E" stroke-width="23" stroke-linecap="round" opacity=".45" filter="url(#soft)"/>
+
+    <!-- Single, full-volume banana: a left-top peel highlight, ribs, restrained freckles, and a brown living stem. -->
+    <g filter="url(#bananaShadow)">
+      <path d="M491 226C510 211 533 214 548 234C575 270 583 327 573 393C560 479 566 591 598 696C611 738 590 790 550 819C527 836 495 839 469 822C438 802 423 763 438 727C482 620 479 495 462 400C450 329 455 267 491 226Z" fill="url(#banana)" stroke="#8A5A2B" stroke-opacity=".64" stroke-width="7" stroke-linejoin="round"/>
+      <path d="M491 226C510 211 533 214 548 234C575 270 583 327 573 393C560 479 566 591 598 696C611 738 590 790 550 819C527 836 495 839 469 822C438 802 423 763 438 727C482 620 479 495 462 400C450 329 455 267 491 226Z" fill="url(#bananaShade)" opacity=".72"/>
+      <path d="M500 249C479 302 489 356 501 422C518 520 513 641 470 744" fill="none" stroke="#FFF4D6" stroke-opacity=".42" stroke-width="15" stroke-linecap="round"/>
+      <path d="M544 260C563 312 557 363 545 431C528 526 539 639 576 719" fill="none" stroke="#8A5A2B" stroke-opacity=".22" stroke-width="9" stroke-linecap="round"/>
+      <path d="M467 818C490 841 535 841 558 819" fill="none" stroke="#8A5A2B" stroke-width="14" stroke-linecap="round"/>
+      <path d="M486 234C478 209 483 183 503 170L528 181C535 198 534 215 548 234C532 222 509 218 491 226Z" fill="url(#stem)" stroke="#0F2E1E" stroke-opacity=".46" stroke-width="6" stroke-linejoin="round"/>
+      <path d="M495 190L516 196" stroke="#FFF4D6" stroke-opacity=".36" stroke-width="7" stroke-linecap="round"/>
+      <g fill="#8A5A2B" opacity=".62">
+        <circle cx="530" cy="289" r="4"/><circle cx="548" cy="330" r="3"/><circle cx="508" cy="369" r="4"/><circle cx="540" cy="427" r="3"/><circle cx="514" cy="484" r="3"/><circle cx="552" cy="549" r="4"/><circle cx="520" cy="619" r="3"/><circle cx="563" cy="665" r="4"/><circle cx="536" cy="754" r="3"/>
+      </g>
+      <path d="M489 247C503 231 525 230 538 244" fill="none" stroke="#FFF4D6" stroke-width="7" stroke-opacity=".45" stroke-linecap="round"/>
+    </g>
+
+    <!-- pinched contact edges sit in front of both materials -->
+    <path d="M442 409C454 421 460 438 458 459M438 593C452 610 453 635 447 654" fill="none" stroke="#0F2E1E" stroke-width="8" stroke-opacity=".38" stroke-linecap="round"/>
+    <path d="M579 409C568 423 563 439 565 459M583 593C570 610 569 635 576 654" fill="none" stroke="#0F2E1E" stroke-width="8" stroke-opacity=".38" stroke-linecap="round"/>
+    <path d="M111 122Q153 89 218 88" fill="none" stroke="#FFF4D6" stroke-width="21" stroke-linecap="round" opacity=".32"/>
+  </g>
+</svg>
+</body>
+</html>

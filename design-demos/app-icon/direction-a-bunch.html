@@ -1,0 +1,159 @@
+<!doctype html>
+<!-- form comes from: 使用者指定的 A 構圖——一個共同冠部下連精確五根成熟香蕉；冠部的雙主叉僅隱約呼應一→二。 -->
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { width: 1024px; height: 1024px; margin: 0; background: transparent; overflow: hidden; }
+  svg { display: block; width: 1024px; height: 1024px; }
+</style>
+</head>
+<body>
+<svg viewBox="0 0 1024 1024" role="img" aria-label="一串五根成熟香蕉的深綠玻璃 app icon">
+  <defs>
+    <!-- brand-palette-only materials -->
+    <linearGradient id="tile" x1="165" y1="116" x2="851" y2="915" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1E5B3A"/>
+      <stop offset=".42" stop-color="#0F2E1E"/>
+      <stop offset="1" stop-color="#0F2E1E"/>
+    </linearGradient>
+    <radialGradient id="tileGlow" cx="0" cy="0" r="1" gradientTransform="translate(311 226) rotate(49) scale(712)">
+      <stop stop-color="#FFF4D6" stop-opacity=".20"/>
+      <stop offset=".32" stop-color="#FFCF2E" stop-opacity=".11"/>
+      <stop offset=".78" stop-color="#1E5B3A" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="glassSheen" x1="195" y1="105" x2="815" y2="890" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF4D6" stop-opacity=".26"/>
+      <stop offset=".24" stop-color="#1E5B3A" stop-opacity=".045"/>
+      <stop offset=".67" stop-color="#FFF4D6" stop-opacity=".025"/>
+      <stop offset="1" stop-color="#0F2E1E" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="aura" cx="0" cy="0" r="1" gradientTransform="translate(506 525) rotate(90) scale(350 330)">
+      <stop stop-color="#FFCF2E" stop-opacity=".38"/>
+      <stop offset=".46" stop-color="#F59E0B" stop-opacity=".13"/>
+      <stop offset="1" stop-color="#0F2E1E" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="bananaLeft" x1="236" y1="385" x2="446" y2="726" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF4D6"/>
+      <stop offset=".11" stop-color="#FFCF2E"/>
+      <stop offset=".52" stop-color="#F59E0B"/>
+      <stop offset=".78" stop-color="#FFCF2E"/>
+      <stop offset="1" stop-color="#8A5A2B"/>
+    </linearGradient>
+    <linearGradient id="bananaMidLeft" x1="402" y1="326" x2="363" y2="791" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF4D6"/>
+      <stop offset=".12" stop-color="#FFCF2E"/>
+      <stop offset=".57" stop-color="#F59E0B"/>
+      <stop offset=".84" stop-color="#FFCF2E"/>
+      <stop offset="1" stop-color="#8A5A2B"/>
+    </linearGradient>
+    <linearGradient id="bananaCenter" x1="475" y1="315" x2="541" y2="814" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF4D6"/>
+      <stop offset=".10" stop-color="#FFCF2E"/>
+      <stop offset=".46" stop-color="#F59E0B"/>
+      <stop offset=".70" stop-color="#FFCF2E"/>
+      <stop offset="1" stop-color="#8A5A2B"/>
+    </linearGradient>
+    <linearGradient id="bananaMidRight" x1="584" y1="331" x2="671" y2="782" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF4D6"/>
+      <stop offset=".13" stop-color="#FFCF2E"/>
+      <stop offset=".55" stop-color="#F59E0B"/>
+      <stop offset=".82" stop-color="#FFCF2E"/>
+      <stop offset="1" stop-color="#8A5A2B"/>
+    </linearGradient>
+    <linearGradient id="bananaRight" x1="664" y1="372" x2="796" y2="700" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF4D6"/>
+      <stop offset=".12" stop-color="#FFCF2E"/>
+      <stop offset=".54" stop-color="#F59E0B"/>
+      <stop offset=".81" stop-color="#FFCF2E"/>
+      <stop offset="1" stop-color="#8A5A2B"/>
+    </linearGradient>
+    <linearGradient id="stem" x1="475" y1="246" x2="571" y2="395" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF4D6"/>
+      <stop offset=".17" stop-color="#8A5A2B"/>
+      <stop offset=".64" stop-color="#F59E0B"/>
+      <stop offset="1" stop-color="#8A5A2B"/>
+    </linearGradient>
+    <filter id="shadow" x="-35%" y="-25%" width="170%" height="175%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="23" result="blur"/>
+      <feOffset dy="28" result="down"/>
+      <feFlood flood-color="#0F2E1E" flood-opacity=".80"/>
+      <feComposite in2="down" operator="in"/>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="softBlur" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="18"/></filter>
+    <filter id="smallBlur" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="6"/></filter>
+    <filter id="innerShade" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="8" result="b"/>
+      <feComposite in="SourceAlpha" in2="b" operator="out" result="rim"/>
+      <feFlood flood-color="#FFF4D6" flood-opacity=".36"/>
+      <feComposite in2="rim" operator="in"/>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <clipPath id="tileClip"><rect x="64" y="64" width="896" height="896" rx="230"/></clipPath>
+  </defs>
+
+  <!-- translucent deep-green squircle glass -->
+  <g clip-path="url(#tileClip)">
+    <rect x="64" y="64" width="896" height="896" rx="230" fill="url(#tile)"/>
+    <rect x="64" y="64" width="896" height="896" rx="230" fill="url(#tileGlow)"/>
+    <ellipse cx="508" cy="525" rx="365" ry="363" fill="url(#aura)" filter="url(#softBlur)"/>
+    <path d="M115 213C210 92 415 83 606 108C808 135 915 245 968 408L968 64L64 64L64 465C72 361 79 263 115 213Z" fill="url(#glassSheen)"/>
+    <path d="M148 741C285 867 663 932 895 727" fill="none" stroke="#FFF4D6" stroke-opacity=".075" stroke-width="3"/>
+    <path d="M173 287C249 139 480 102 665 157" fill="none" stroke="#FFF4D6" stroke-opacity=".16" stroke-width="9" stroke-linecap="round" filter="url(#smallBlur)"/>
+
+    <!-- restrained refracted warmth, contained in glass -->
+    <ellipse cx="501" cy="557" rx="280" ry="246" fill="none" stroke="#FFCF2E" stroke-opacity=".15" stroke-width="24" filter="url(#softBlur)"/>
+    <ellipse cx="501" cy="557" rx="230" ry="213" fill="none" stroke="#FFF4D6" stroke-opacity=".08" stroke-width="3"/>
+
+    <g filter="url(#shadow)">
+      <!-- banana 1 / back-left -->
+      <path d="M458 337C392 356 305 431 245 536C208 602 195 668 224 702C246 728 287 726 322 694C393 628 449 511 482 393C491 359 482 331 458 337Z" fill="url(#bananaLeft)" stroke="#8A5A2B" stroke-opacity=".62" stroke-width="8" stroke-linejoin="round"/>
+      <path d="M452 356C382 398 300 516 253 627" fill="none" stroke="#FFF4D6" stroke-opacity=".56" stroke-width="15" stroke-linecap="round" filter="url(#smallBlur)"/>
+      <path d="M240 687C265 705 293 699 320 671" fill="none" stroke="#8A5A2B" stroke-opacity=".7" stroke-width="10" stroke-linecap="round"/>
+
+      <!-- banana 2 / left-middle -->
+      <path d="M491 331C432 360 379 458 354 570C334 662 344 741 386 773C416 795 456 778 474 731C504 650 516 510 520 384C522 343 510 321 491 331Z" fill="url(#bananaMidLeft)" stroke="#8A5A2B" stroke-opacity=".62" stroke-width="8" stroke-linejoin="round"/>
+      <path d="M479 354C434 424 406 554 404 672" fill="none" stroke="#FFF4D6" stroke-opacity=".55" stroke-width="14" stroke-linecap="round" filter="url(#smallBlur)"/>
+      <path d="M379 752C405 776 438 763 452 727" fill="none" stroke="#8A5A2B" stroke-opacity=".7" stroke-width="10" stroke-linecap="round"/>
+
+      <!-- banana 4 / right-middle -->
+      <path d="M542 336C559 449 573 578 610 685C628 740 667 774 704 754C746 732 747 657 719 571C685 466 626 369 569 333C554 323 540 322 542 336Z" fill="url(#bananaMidRight)" stroke="#8A5A2B" stroke-opacity=".62" stroke-width="8" stroke-linejoin="round"/>
+      <path d="M568 352C621 425 663 539 678 652" fill="none" stroke="#FFF4D6" stroke-opacity=".48" stroke-width="14" stroke-linecap="round" filter="url(#smallBlur)"/>
+      <path d="M665 748C692 764 716 733 716 697" fill="none" stroke="#8A5A2B" stroke-opacity=".72" stroke-width="10" stroke-linecap="round"/>
+
+      <!-- banana 5 / back-right -->
+      <path d="M575 340C622 388 688 485 731 593C755 655 749 710 717 735C684 760 644 735 617 693C564 610 534 488 534 378C534 339 554 319 575 340Z" fill="url(#bananaRight)" stroke="#8A5A2B" stroke-opacity=".62" stroke-width="8" stroke-linejoin="round"/>
+      <path d="M579 365C631 430 691 549 717 656" fill="none" stroke="#FFF4D6" stroke-opacity=".42" stroke-width="14" stroke-linecap="round" filter="url(#smallBlur)"/>
+      <path d="M703 730C676 742 656 716 643 687" fill="none" stroke="#8A5A2B" stroke-opacity=".7" stroke-width="10" stroke-linecap="round"/>
+
+      <!-- banana 3 / central visual anchor -->
+      <path d="M518 321C478 351 449 446 449 563C449 665 468 761 512 797C547 825 585 799 595 750C615 651 603 505 573 389C562 347 541 311 518 321Z" fill="url(#bananaCenter)" stroke="#8A5A2B" stroke-opacity=".68" stroke-width="9" stroke-linejoin="round"/>
+      <path d="M511 353C488 429 488 602 523 717" fill="none" stroke="#FFF4D6" stroke-opacity=".68" stroke-width="17" stroke-linecap="round" filter="url(#smallBlur)"/>
+      <path d="M495 778C520 805 554 793 567 753" fill="none" stroke="#8A5A2B" stroke-opacity=".72" stroke-width="11" stroke-linecap="round"/>
+
+      <!-- shared five-neck crown: two quiet main forks -->
+      <path d="M483 349C461 337 429 338 406 354M493 342C476 325 449 317 425 319M537 345C558 332 588 334 610 354M530 341C548 321 577 315 600 322" fill="none" stroke="#8A5A2B" stroke-width="23" stroke-linecap="round"/>
+      <path d="M450 323C458 281 479 254 509 247C540 252 563 282 574 324L555 359C529 340 489 340 467 359Z" fill="url(#stem)" stroke="#8A5A2B" stroke-width="9" stroke-linejoin="round"/>
+      <path d="M467 283C489 265 517 264 538 280" fill="none" stroke="#FFF4D6" stroke-opacity=".52" stroke-width="9" stroke-linecap="round"/>
+      <path d="M476 247C484 216 518 200 544 220L550 253C529 239 503 239 481 258Z" fill="#8A5A2B"/>
+      <path d="M486 238C503 222 522 220 536 230" fill="none" stroke="#FFF4D6" stroke-opacity=".45" stroke-width="7" stroke-linecap="round"/>
+    </g>
+
+    <!-- small, realistic peel flecks: limited and on the fruit only -->
+    <g fill="#8A5A2B" fill-opacity=".75">
+      <circle cx="285" cy="601" r="6"/><circle cx="313" cy="563" r="4"/><circle cx="337" cy="518" r="5"/><circle cx="374" cy="455" r="4"/>
+      <circle cx="385" cy="652" r="5"/><circle cx="399" cy="580" r="4"/><circle cx="416" cy="505" r="6"/><circle cx="447" cy="422" r="4"/>
+      <circle cx="515" cy="681" r="5"/><circle cx="532" cy="611" r="4"/><circle cx="521" cy="522" r="6"/><circle cx="532" cy="453" r="4"/>
+      <circle cx="629" cy="620" r="4"/><circle cx="644" cy="564" r="6"/><circle cx="632" cy="488" r="4"/><circle cx="611" cy="424" r="5"/>
+      <circle cx="692" cy="646" r="5"/><circle cx="687" cy="579" r="4"/><circle cx="661" cy="505" r="5"/>
+    </g>
+
+    <!-- foreground glass edge / soft luminous bento lens -->
+    <rect x="73" y="73" width="878" height="878" rx="221" fill="none" stroke="#FFF4D6" stroke-opacity=".24" stroke-width="8"/>
+    <rect x="82" y="82" width="860" height="860" rx="213" fill="none" stroke="#1E5B3A" stroke-opacity=".62" stroke-width="5"/>
+    <path d="M210 140C340 89 548 89 681 141" fill="none" stroke="#FFF4D6" stroke-opacity=".18" stroke-width="6" stroke-linecap="round"/>
+  </g>
+</svg>
+</body>
+</html>

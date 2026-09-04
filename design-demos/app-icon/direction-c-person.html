@@ -1,0 +1,163 @@
+<!-- form comes from: 使用者指定的 C「香蕉人」構圖；展開至左右的雙手把 Banana Hand 的一個 shortcut 分送至兩個 tab 化為姿態。 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { width: 1024px; height: 1024px; margin: 0; background: transparent; overflow: hidden; }
+  svg { display: block; width: 1024px; height: 1024px; }
+</style>
+</head>
+<body>
+<svg viewBox="0 0 1024 1024" role="img" aria-label="Premium banana person app icon">
+  <defs>
+    <clipPath id="tileClip"><rect x="45" y="45" width="934" height="934" rx="230"/></clipPath>
+
+    <radialGradient id="tileLight" cx="23%" cy="16%" r="92%">
+      <stop offset="0" stop-color="#FFF4D6"/>
+      <stop offset="0.48" stop-color="#FFCF2E"/>
+      <stop offset="1" stop-color="#F59E0B"/>
+    </radialGradient>
+    <linearGradient id="tileSheen" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFF4D6" stop-opacity=".62"/>
+      <stop offset=".42" stop-color="#FFF4D6" stop-opacity="0"/>
+      <stop offset="1" stop-color="#8A5A2B" stop-opacity=".20"/>
+    </linearGradient>
+    <linearGradient id="bananaSkin" x1=".15" y1=".06" x2=".87" y2=".93">
+      <stop offset="0" stop-color="#FFF4D6"/>
+      <stop offset=".16" stop-color="#FFCF2E"/>
+      <stop offset=".59" stop-color="#FFCF2E"/>
+      <stop offset=".83" stop-color="#F59E0B"/>
+      <stop offset="1" stop-color="#8A5A2B"/>
+    </linearGradient>
+    <linearGradient id="bananaSide" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#F59E0B"/>
+      <stop offset=".44" stop-color="#FFCF2E"/>
+      <stop offset="1" stop-color="#8A5A2B"/>
+    </linearGradient>
+    <linearGradient id="stem" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFF4D6"/>
+      <stop offset=".22" stop-color="#8A5A2B"/>
+      <stop offset=".76" stop-color="#8A5A2B"/>
+      <stop offset="1" stop-color="#0F2E1E"/>
+    </linearGradient>
+    <radialGradient id="target" cx="30%" cy="22%" r="76%">
+      <stop offset="0" stop-color="#FFF4D6"/>
+      <stop offset=".28" stop-color="#FFCF2E"/>
+      <stop offset="1" stop-color="#F59E0B"/>
+    </radialGradient>
+    <filter id="tileShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="22" stdDeviation="22" flood-color="#0F2E1E" flood-opacity=".32"/>
+    </filter>
+    <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+    <filter id="heroShadow" x="-40%" y="-35%" width="180%" height="190%">
+      <feDropShadow dx="0" dy="24" stdDeviation="16" flood-color="#0F2E1E" flood-opacity=".34"/>
+      <feDropShadow dx="-7" dy="-9" stdDeviation="5" flood-color="#FFF4D6" flood-opacity=".30"/>
+    </filter>
+    <filter id="armShadow" x="-40%" y="-50%" width="180%" height="200%">
+      <feDropShadow dx="0" dy="11" stdDeviation="8" flood-color="#0F2E1E" flood-opacity=".32"/>
+    </filter>
+    <filter id="innerGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="8"/>
+    </filter>
+  </defs>
+
+  <!-- warm squircle tile: explicit shape leaves every outside corner transparent -->
+  <g filter="url(#tileShadow)">
+    <rect x="45" y="45" width="934" height="934" rx="230" fill="url(#tileLight)"/>
+  </g>
+  <g clip-path="url(#tileClip)">
+    <rect x="45" y="45" width="934" height="934" rx="230" fill="url(#tileSheen)"/>
+    <ellipse cx="260" cy="166" rx="250" ry="138" fill="#FFF4D6" opacity=".20" filter="url(#soft)"/>
+    <ellipse cx="814" cy="871" rx="248" ry="165" fill="#8A5A2B" opacity=".13" filter="url(#soft)"/>
+
+    <!-- restrained two-tab targets, visibly secondary to the mascot -->
+    <g opacity=".84" filter="url(#armShadow)">
+      <circle cx="180" cy="490" r="52" fill="#FFF4D6" opacity=".68"/>
+      <circle cx="180" cy="490" r="39" fill="url(#target)"/>
+      <circle cx="180" cy="490" r="19" fill="#1E5B3A"/>
+      <circle cx="844" cy="490" r="52" fill="#FFF4D6" opacity=".68"/>
+      <circle cx="844" cy="490" r="39" fill="url(#target)"/>
+      <circle cx="844" cy="490" r="19" fill="#1E5B3A"/>
+    </g>
+
+    <!-- grounded contact shadow under feet -->
+    <ellipse cx="512" cy="831" rx="197" ry="37" fill="#0F2E1E" opacity=".28" filter="url(#soft)"/>
+    <ellipse cx="512" cy="818" rx="144" ry="20" fill="#8A5A2B" opacity=".35" filter="url(#innerGlow)"/>
+
+    <!-- broad, single-stroke dispatch arms: hand gestures are legible when small -->
+    <g fill="none" stroke-linecap="round" stroke-linejoin="round" filter="url(#armShadow)">
+      <path d="M395 542 C337 544 303 521 260 502 L216 494" stroke="#0F2E1E" stroke-width="44"/>
+      <path d="M629 542 C687 544 721 521 764 502 L808 494" stroke="#0F2E1E" stroke-width="44"/>
+      <path d="M394 531 C339 530 305 508 263 491 L218 483" stroke="#1E5B3A" stroke-width="27"/>
+      <path d="M630 531 C685 530 719 508 761 491 L806 483" stroke="#1E5B3A" stroke-width="27"/>
+    </g>
+    <!-- left / right hands, three rounded fingers only -->
+    <g fill="#1E5B3A" filter="url(#armShadow)">
+      <circle cx="217" cy="484" r="25"/><circle cx="198" cy="505" r="21"/><circle cx="218" cy="522" r="20"/>
+      <circle cx="807" cy="484" r="25"/><circle cx="826" cy="505" r="21"/><circle cx="806" cy="522" r="20"/>
+    </g>
+    <g fill="#FFF4D6" opacity=".20">
+      <circle cx="210" cy="476" r="9"/><circle cx="800" cy="476" r="9"/>
+    </g>
+
+    <!-- feet sit behind banana body, with toe-level highlight and AO -->
+    <g filter="url(#armShadow)">
+      <path d="M442 760 C411 789 402 824 421 849 C444 878 500 868 510 834 L515 789Z" fill="#0F2E1E"/>
+      <path d="M582 760 C613 789 622 824 603 849 C580 878 524 868 514 834 L509 789Z" fill="#0F2E1E"/>
+      <path d="M434 824 C451 845 484 844 495 819" fill="none" stroke="#1E5B3A" stroke-width="17" stroke-linecap="round"/>
+      <path d="M590 824 C573 845 540 844 529 819" fill="none" stroke="#1E5B3A" stroke-width="17" stroke-linecap="round"/>
+    </g>
+
+    <!-- banana body: an intentionally substantial curved fruit, not a sticker silhouette -->
+    <g filter="url(#heroShadow)">
+      <path d="M512 247 C414 254 358 342 362 467 C365 592 422 723 512 786 C602 723 659 592 662 467 C666 342 610 254 512 247Z" fill="url(#bananaSkin)"/>
+      <!-- lower-side convex volume -->
+      <path d="M589 293 C637 358 637 477 603 594 C580 672 548 728 512 759 C552 673 570 593 568 492 C567 400 552 337 522 270 C548 273 572 280 589 293Z" fill="url(#bananaSide)" opacity=".58"/>
+      <!-- dark peel edge makes the fruit readable at 16 px -->
+      <path d="M512 247 C414 254 358 342 362 467 C365 592 422 723 512 786" fill="none" stroke="#8A5A2B" stroke-opacity=".42" stroke-width="13" stroke-linecap="round"/>
+      <path d="M512 247 C610 254 666 342 662 467 C659 592 602 723 512 786" fill="none" stroke="#0F2E1E" stroke-opacity=".34" stroke-width="13" stroke-linecap="round"/>
+      <!-- left-top key light: contained so it reads as material, not decoration -->
+      <path d="M449 311 C404 351 398 441 420 516 C432 555 446 580 463 600" fill="none" stroke="#FFF4D6" stroke-opacity=".62" stroke-width="42" stroke-linecap="round" filter="url(#innerGlow)"/>
+      <path d="M448 310 C415 348 412 414 423 461" fill="none" stroke="#FFF4D6" stroke-opacity=".78" stroke-width="17" stroke-linecap="round"/>
+      <ellipse cx="479" cy="700" rx="72" ry="47" fill="#FFF4D6" opacity=".12" filter="url(#innerGlow)"/>
+    </g>
+
+    <!-- natural brown stem and crown, on top of the fruit -->
+    <g filter="url(#heroShadow)">
+      <path d="M469 270 C475 222 469 184 489 157 C506 135 545 142 556 165 C567 189 550 217 548 255 L539 284Z" fill="url(#stem)"/>
+      <path d="M478 181 C498 158 529 158 546 177" fill="none" stroke="#FFF4D6" stroke-opacity=".48" stroke-width="12" stroke-linecap="round"/>
+      <path d="M466 268 C486 250 535 248 558 269 L548 296 C530 281 491 281 474 296Z" fill="#8A5A2B"/>
+      <path d="M478 272 C495 261 526 261 543 274" fill="none" stroke="#FFF4D6" stroke-opacity=".35" stroke-width="8" stroke-linecap="round"/>
+    </g>
+
+    <!-- minimal face: two eyes plus a single quiet smile -->
+    <g>
+      <ellipse cx="466" cy="507" rx="22" ry="31" fill="#0F2E1E"/>
+      <ellipse cx="558" cy="507" rx="22" ry="31" fill="#0F2E1E"/>
+      <ellipse cx="458" cy="496" rx="7" ry="11" fill="#FFF4D6" opacity=".85"/>
+      <ellipse cx="550" cy="496" rx="7" ry="11" fill="#FFF4D6" opacity=".85"/>
+      <path d="M484 568 C502 585 522 585 540 568" fill="none" stroke="#0F2E1E" stroke-width="17" stroke-linecap="round"/>
+      <path d="M492 571 C503 578 518 578 531 571" fill="none" stroke="#FFF4D6" stroke-opacity=".34" stroke-width="5" stroke-linecap="round"/>
+    </g>
+
+    <!-- controlled skin freckle cluster: the signature 120-percent detail -->
+    <g fill="#8A5A2B" opacity=".70">
+      <circle cx="429" cy="616" r="8"/><circle cx="447" cy="640" r="5"/><circle cx="432" cy="661" r="6"/>
+      <circle cx="456" cy="678" r="4"/><circle cx="442" cy="697" r="7"/><circle cx="469" cy="714" r="4"/>
+      <circle cx="587" cy="620" r="5"/><circle cx="579" cy="641" r="3"/><circle cx="594" cy="660" r="4"/>
+    </g>
+    <g fill="#FFF4D6" opacity=".46">
+      <circle cx="426" cy="612" r="2.5"/><circle cx="440" cy="692" r="2"/><circle cx="584" cy="617" r="2"/>
+    </g>
+
+    <!-- tile rim: a restrained product-object edge -->
+    <rect x="55" y="55" width="914" height="914" rx="220" fill="none" stroke="#FFF4D6" stroke-width="10" stroke-opacity=".39"/>
+    <path d="M196 119 H640" fill="none" stroke="#FFF4D6" stroke-width="13" stroke-linecap="round" stroke-opacity=".33"/>
+  </g>
+</svg>
+</body>
+</html>
