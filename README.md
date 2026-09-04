@@ -2,6 +2,48 @@
 
 以 Tauri 2 + Rust 建立的桌面發送協調器。使用者在每次 App 啟動後，從已連線的 Chrome 或 Firefox WebExtension 選出兩個不同的 Browser Tab，再將快捷鍵庫中選定的單一組合按鍵依序做盡力原生發送。
 
+## 使用說明（給一般使用者）
+
+Banana Hand 讓「一個快捷鍵」同時對兩個瀏覽器分頁做動作。第一次使用照下面四步走：
+
+### 第 1 步：安裝桌面 App
+- **Windows**：執行 NSIS 安裝程式。
+- **macOS**：把 DMG 裡的 `Banana Hand` 拖到「應用程式」。首次開啟會先被 Gatekeeper 擋，選「開啟」後再到「系統設定 → 隱私與安全性」再按「仍要開啟」，並授予「輔助功能」權限。
+- **Linux**：安裝 `.deb`（或用 AppImage）。
+
+### 第 2 步：加入瀏覽器插件
+> App 靠「瀏覽器插件」看得到你的分頁。插件還沒上架商店，目前要先用「未封裝」方式載入（取得專案來源或發布包後照做；正式版本會改成商店一鍵安裝）。
+
+**Chrome**
+1. 地址列輸入 `chrome://extensions`，按 Enter。
+2. 右上角把「開發者模式」打開。
+3. 按「載入未封裝的擴充功能」，選到專案裡的 `extensions/chromium/` 資料夾。
+4. 清單出現「Banana Hand」即成功。
+
+**Firefox**
+1. 地址列輸入 `about:addons`，按 Enter。
+2. 右上角齒輪選「安裝附加元件…」(Install Add-on From File)。
+3. 選到 `extensions/firefox/manifest.json`。
+4. 出現「Banana Hand」即成功。
+
+### 第 3 步：讓 Browser 找到 Host
+1. 開啟 Banana Hand，到「讓 Browser 找到 Host」面板。
+2. 選你的瀏覽器（`Chrome / Chromium` 或 `Firefox`）。
+3. Chrome / Chromium 要填 **Extension ID**：回 `chrome://extensions` 點「Banana Hand」的「詳細資料」即可看到；Firefox 用固定 id，欄位留空。
+4. 按「登錄 native host」，出現「已寫入 …」即成功。
+
+### 第 4 步：發送
+1. 在「快捷鍵庫」按「新增快捷鍵」，填名稱與組合（例如 `Ctrl+Shift+K`）。
+2. 在「發送」面板的「目標 01」「目標 02」各選一個已連線的分頁（兩者必須不同）。
+3. 選一個快捷鍵，按「發送快捷鍵」。
+4. App 會依序對兩個分頁盡力送出，並在下方顯示結果。
+
+### 常見問題
+- **看不到我的分頁**：確認第 2 步插件已啟用、第 3 步已登錄，再重啟 App。
+- **按下發送沒反應／顯示被拒**：看「發送」下方的結果；若提示權限不足，到系統設定授予輸入權限（macOS 為「輔助功能」）。
+- **快捷鍵沒送達**：這是「盡力發送」，App 只保證「有嘗試」，不保證網站收到（見下方「發送契約」）。
+- **重啟 App 要重選分頁**：設計如此，分頁選取是 session-only。
+
 ## 本機開發
 
 ```sh
