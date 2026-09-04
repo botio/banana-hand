@@ -22,7 +22,11 @@ Banana Hand 讓「一個快捷鍵」同時對兩個瀏覽器分頁做動作。�
 從最新的 [GitHub Preview Release](https://github.com/botio/banana-hand/releases) 下載符合
 作業系統的 desktop asset：
 - **Windows**：執行 NSIS `.exe` 安裝程式。
-- **macOS**：開啟未簽署的 DMG，把 `Banana Hand` 拖到「應用程式」。首次開啟會先被 Gatekeeper 擋，選「開啟」後再到「系統設定 → 隱私與安全性」按「仍要開啟」，並授予「輔助功能」權限。
+- **macOS（目前僅 Apple Silicon）**：只下載檔名含 `_aarch64.dmg` 的 Preview asset；**Intel Mac 不相容，請勿嘗試繞過 Gatekeeper**。在 Apple Silicon 上，先把 `Banana Hand.app` 拖到「應用程式」，再依序嘗試：
+  1. 於 Finder 對 `Banana Hand.app` 按住 Control 點擊（或右鍵）→「開啟」→ 再按一次「開啟」；這是比「Open Anyway」更可靠的單一 app Gatekeeper 放行路徑。
+  2. 若系統設定「隱私權與安全性」顯示「仍要開啟」，可改按它。
+  3. 只有在彈窗是「無法驗證開發者」時才適用上述流程；若顯示「已毀損」或「無法在此 Mac 上開啟」，停止並回報完整訊息，勿以移除 quarantine 屬性繞過。
+  App 成功啟動後，再授予「輔助功能」權限。
 - **Linux**：安裝 `.deb`（或使用 AppImage）。
 
 ### 第 2 步：加入瀏覽器插件

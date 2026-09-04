@@ -124,7 +124,7 @@ jobs:
             -o -name '*.zip' -o -name '*.xpi' \
           \) -print0)
           test "${#assets[@]}" -gt 0
-          notes=$'Preview release only: build artifacts are attached, but this release does not claim a supported platform/browser pair. See docs/adr/0003-release-evidence-matrix.md for the required 24-cell real-device evidence matrix.\n\nFirefox XPI is unsigned: it installs only in Firefox Developer Edition, Nightly, or ESR with signature enforcement disabled until AMO signing is available.'
+          notes=$'Preview release only: build artifacts are attached, but this release does not claim a supported platform/browser pair. See docs/adr/0003-release-evidence-matrix.md for the required 24-cell real-device evidence matrix.\n\nThe macOS DMG targets Apple Silicon only (aarch64). On a compatible Mac, use Finder Control-click → Open if System Settings does not show Open Anyway; do not bypass an incompatible or damaged-app alert.\n\nFirefox XPI is unsigned: it installs only in Firefox Developer Edition, Nightly, or ESR with signature enforcement disabled until AMO signing is available.'
           if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             gh release edit "${GITHUB_REF_NAME}" \
               --repo "${GITHUB_REPOSITORY}" \
