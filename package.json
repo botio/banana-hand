@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1420",
     "build": "tsc --noEmit && vite build",
+    "test:ui": "playwright test tests/shortcut-form.spec.mjs --workers=1",
     "native-host-manifest": "node scripts/write-native-host-manifest.mjs",
     "bundle-native-host": "node scripts/bundle-native-host.mjs",
     "package-chromium-extension": "node scripts/package-chromium-extension.mjs",
@@ -19,6 +20,7 @@
     "@tauri-apps/plugin-store": "^2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tauri-apps/cli": "^2",
     "typescript": "^5",
     "vite": "^7",

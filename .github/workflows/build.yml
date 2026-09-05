@@ -78,6 +78,12 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Verify shortcut input survives background refresh
+        if: matrix.os == 'ubuntu-24.04'
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:ui
+
       # Runs `beforeBuildCommand` (native-host sidecar + frontend build), then
       # bundles the targets valid for this OS. On macOS there is no Apple
       # Developer ID, so the DMG is ad-hoc signed; the user clears Gatekeeper

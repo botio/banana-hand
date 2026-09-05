@@ -16,13 +16,14 @@ if (!root) throw new Error("缺少 #app 節點");
 const app: HTMLElement = root;
 
 let settings: Settings = { schemaVersion: 1, shortcuts: [] };
+let renderedShortcuts: ShortcutRecord[] | undefined;
+let savingShortcut = false;
 let snapshot: RuntimeSnapshot = { tabs: [], cooldown_remaining_seconds: 0 };
 let selectedShortcutId: string | undefined;
 let selectedFirstTarget: string | undefined;
 let selectedSecondTarget: string | undefined;
 let repository: SettingsRepository | undefined;
 let statusMessage = "正在連線到桌面協調器…";
-let shortcutDraft = { name: "", chord: "" };
 let nativeHostBrowser: "chrome" | "firefox" = "chrome";
 let nativeHostResult = "";
 let dispatchResult = "";
@@ -95,7 +96,7 @@ function canDispatch(): boolean {
   );
 }
 
-function render(): void {
+function mount(): void {
   app.innerHTML = `
     <section class="shell" aria-label="Banana Hand 發送協調器">
       <header class="masthead">
@@ -112,7 +113,7 @@ function render(): void {
               <p class="eyebrow">PERSISTENT SETTINGS</p>
               <h2 id="shortcut-title">快捷鍵庫</h2>
             </div>
-            <span>${settings.shortcuts.length} 個快捷鍵</span>
+            <span id="shortcut-count"></span>
           </div>
           <div id="shortcut-list" class="shortcut-list" role="radiogroup" aria-label="選取本次發送的快捷鍵"></div>
           <form id="shortcut-form" class="shortcut-form">
@@ -165,44 +166,68 @@ function render(): void {
     </section>
   `;
 
+  requireElement<HTMLButtonElement>("#dispatch").addEventListener("click", dispatchShortcut);
+  const firstTarget = requireElement<HTMLSelectElement>("#first-target");
+  firstTarget.addEventListener("change", () => {
+    selectedFirstTarget = firstTarget.value || undefined;
+    render();
+  });
+  const secondTarget = requireElement<HTMLSelectElement>("#second-target");
+  secondTarget.addEventListener("change", () => {
+    selectedSecondTarget = secondTarget.value || undefined;
+    render();
+  });
+  const nativeHostSelect = requireElement<HTMLSelectElement>("#nh-browser");
+  nativeHostSelect.addEventListener("change", () => {
+    nativeHostBrowser = nativeHostSelect.value as "chrome" | "firefox";
+  });
+  requireElement<HTMLFormElement>("#shortcut-form").addEventListener("submit", addShortcut);
+  requireElement<HTMLButtonElement>("#nh-register").addEventListener("click", registerNativeHost);
+}
+
+function render(): void {
+  // Polling must not replace live form controls: focus, selection and IME
+  // composition belong to the existing DOM nodes, not a copied draft.
+
   const connectionStatus = requireElement("#connection-status");
   connectionStatus.textContent = statusMessage;
   connectionStatus.classList.toggle("connected", snapshot.tabs.length > 0);
 
+  requireElement("#shortcut-count").textContent = `${settings.shortcuts.length} 個快捷鍵`;
   const list = requireElement("#shortcut-list");
-  if (settings.shortcuts.length === 0) {
-    list.textContent = "尚無快捷鍵。新增後即可選取。";
-    list.classList.add("empty");
-  } else {
-    settings.shortcuts.forEach((shortcut) => {
-      const label = document.createElement("label");
-      label.className = "shortcut-card";
-      const input = document.createElement("input");
-      input.type = "radio";
-      input.name = "shortcut";
-      input.value = shortcut.id;
-      input.checked = shortcut.id === selectedShortcutId;
-      input.addEventListener("change", () => {
-        selectedShortcutId = shortcut.id;
-        render();
+  if (renderedShortcuts !== settings.shortcuts) {
+    list.replaceChildren();
+    list.classList.toggle("empty", settings.shortcuts.length === 0);
+    if (settings.shortcuts.length === 0) {
+      list.textContent = "尚無快捷鍵。新增後即可選取。";
+    } else {
+      settings.shortcuts.forEach((shortcut) => {
+        const label = document.createElement("label");
+        label.className = "shortcut-card";
+        const input = document.createElement("input");
+        input.type = "radio";
+        input.name = "shortcut";
+        input.value = shortcut.id;
+        input.addEventListener("change", () => {
+          selectedShortcutId = shortcut.id;
+          render();
+        });
+        const name = document.createElement("strong");
+        name.textContent = shortcut.name;
+        const chord = document.createElement("code");
+        chord.textContent = shortcut.chord;
+        label.append(input, name, chord);
+        list.append(label);
       });
-      const name = document.createElement("strong");
-      name.textContent = shortcut.name;
-      const chord = document.createElement("code");
-      chord.textContent = shortcut.chord;
-      label.append(input, name, chord);
-      list.append(label);
-    });
+    }
+    renderedShortcuts = settings.shortcuts;
   }
+  list.querySelectorAll<HTMLInputElement>("input").forEach((input) => {
+    input.checked = input.value === selectedShortcutId;
+  });
 
-  populateTargets("#first-target", selectedFirstTarget, (value) => {
-    selectedFirstTarget = value || undefined;
-    render();
-  });
-  populateTargets("#second-target", selectedSecondTarget, (value) => {
-    selectedSecondTarget = value || undefined;
-    render();
-  });
+  populateTargets("#first-target", selectedFirstTarget);
+  populateTargets("#second-target", selectedSecondTarget);
 
   const cooldown = requireElement("#cooldown");
   cooldown.textContent = snapshot.cooldown_remaining_seconds
@@ -217,41 +242,25 @@ function render(): void {
   requireElement("#result").textContent = dispatchResult;
   requireElement("#nh-result").textContent = nativeHostResult;
 
-
-  const dispatch = requireElement<HTMLButtonElement>("#dispatch");
-  dispatch.disabled = !canDispatch();
-  dispatch.addEventListener("click", dispatchShortcut);
-
-  const shortcutName = requireElement<HTMLInputElement>('input[name="name"]');
-  shortcutName.value = shortcutDraft.name;
-  shortcutName.addEventListener("input", () => {
-    shortcutDraft.name = shortcutName.value;
-  });
-  const shortcutChord = requireElement<HTMLInputElement>('input[name="chord"]');
-  shortcutChord.value = shortcutDraft.chord;
-  shortcutChord.addEventListener("input", () => {
-    shortcutDraft.chord = shortcutChord.value;
-  });
-  const nativeHostSelect = requireElement<HTMLSelectElement>("#nh-browser");
-  nativeHostSelect.value = nativeHostBrowser;
-  nativeHostSelect.addEventListener("change", () => {
-    nativeHostBrowser = nativeHostSelect.value as "chrome" | "firefox";
-  });
-
-  requireElement<HTMLFormElement>("#shortcut-form").addEventListener("submit", addShortcut);
-  requireElement<HTMLButtonElement>("#nh-register").addEventListener("click", registerNativeHost);
+  requireElement<HTMLButtonElement>("#dispatch").disabled = !canDispatch();
+  requireElement<HTMLButtonElement>('#shortcut-form button[type="submit"]').disabled = savingShortcut;
 }
 
-function populateTargets(selector: string, selected: string | undefined, onChange: (value: string) => void): void {
+function populateTargets(selector: string, selected: string | undefined): void {
   const select = requireElement<HTMLSelectElement>(selector);
-  snapshot.tabs.forEach((tab) => {
-    const option = document.createElement("option");
-    option.value = targetKey(tab);
-    option.textContent = formatTab(tab);
-    option.selected = option.value === selected;
-    select.append(option);
-  });
-  select.addEventListener("change", () => onChange(select.value));
+  const unchanged = select.options.length === snapshot.tabs.length + 1
+    && snapshot.tabs.every((tab, index) => {
+      const option = select.options[index + 1];
+      return option.value === targetKey(tab) && option.textContent === formatTab(tab);
+    });
+  if (!unchanged) {
+    select.replaceChildren(new Option("重新選擇目標", ""));
+    snapshot.tabs.forEach((tab) => {
+      select.append(new Option(formatTab(tab), targetKey(tab)));
+    });
+  }
+  select.value = selected ?? "";
+  if (select.selectedIndex === -1) select.selectedIndex = 0;
 }
 
 async function registerNativeHost(): Promise<void> {
@@ -275,6 +284,7 @@ async function registerNativeHost(): Promise<void> {
 
 async function addShortcut(event: SubmitEvent): Promise<void> {
   event.preventDefault();
+  if (savingShortcut) return;
   const form = event.currentTarget as HTMLFormElement;
   const values = new FormData(form);
   try {
@@ -283,13 +293,20 @@ async function addShortcut(event: SubmitEvent): Promise<void> {
     if (!name) throw new Error("快捷鍵名稱不可為空白。");
     if (!repository) throw new Error("持久化設定尚未可用。");
     const shortcut = { id: crypto.randomUUID(), name, chord, order: settings.shortcuts.length };
+    savingShortcut = true;
+    render();
     settings = await repository.replaceShortcuts([...settings.shortcuts, shortcut]);
     selectedShortcutId = shortcut.id;
-    shortcutDraft = { name: "", chord: "" };
+    const currentValues = new FormData(form);
+    if (currentValues.get("name") === values.get("name")
+      && currentValues.get("chord") === values.get("chord")) {
+      form.reset();
+    }
     statusMessage = `已儲存「${name}」。`;
-    render();
   } catch (error) {
     statusMessage = error instanceof Error ? error.message : "無法新增快捷鍵。";
+  } finally {
+    savingShortcut = false;
     render();
   }
 }
@@ -367,4 +384,5 @@ async function bootstrap(): Promise<void> {
   window.setInterval(() => void refreshRuntime(), 1_000);
 }
 
+mount();
 void bootstrap();
