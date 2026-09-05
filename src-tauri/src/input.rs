@@ -264,7 +264,7 @@ fn send_macos(chord: &ShortcutChord) -> Result<(), InputError> {
     unsafe extern "C" {
         fn AXIsProcessTrustedWithOptions(options: *const c_void) -> bool;
         fn CFBooleanCreate(value: bool) -> *const c_void;
-        fn CFStringCreateWithCString(encoding: u32, string: *const i8) -> *const c_void;
+        fn CFStringCreateWithCString(encoding: u32, string: *const u8) -> *const c_void;
         fn CFDictionaryCreate(
             info: *const c_void,
             keys: *const *const c_void,
@@ -327,14 +327,14 @@ fn send_macos(chord: &ShortcutChord) -> Result<(), InputError> {
 
 #[cfg(target_os = "macos")]
 fn verify_macos_foreground(browser: &BrowserKind) -> Result<(), InputError> {
-    let expected = match browser {
-        BrowserKind::Chrome => [
+    let expected: &[&str] = match browser {
+        BrowserKind::Chrome => &[
             "Google Chrome",
             "Google Chrome Beta",
             "Google Chrome Canary",
             "Chromium",
         ],
-        BrowserKind::Firefox => ["Firefox"],
+        BrowserKind::Firefox => &["Firefox"],
     };
     // Window activation is asynchronous on macOS: until the window server
     // commits the switch, the previously frontmost app still receives
@@ -360,19 +360,19 @@ fn frontmost_window_owner() -> Option<String> {
     #[link(name = "CoreFoundation", kind = "framework")]
     #[link(name = "CoreGraphics", kind = "framework")]
     unsafe extern "C" {
-        fn CGWindowListCopyWindowInfo(option: u32, relative_to_window: u32) -> *const c_void;
+        fn CGWindowListCopyWindowInfo(option: i32, relative_to_window: u32) -> *const c_void;
         fn CFArrayGetCount(array: *const c_void) -> isize;
         fn CFArrayGetValueAtIndex(array: *const c_void, index: isize) -> *const c_void;
         fn CFDictionaryGetValue(dict: *const c_void, key: *const c_void) -> *const c_void;
-        fn CFStringCreateWithCString(encoding: u32, string: *const i8) -> *const c_void;
+        fn CFStringCreateWithCString(encoding: u32, string: *const u8) -> *const c_void;
         fn CFNumberGetValue(number: *const c_void, number_type: u32, value: *mut i64) -> bool;
         fn CFRelease(value: *const c_void);
     }
 
     const UTF8: u32 = 0x0800_0100;
     const SINT64: u32 = 6; // kCFNumberSInt64Type
-    const ON_SCREEN: u32 = 1; // kCGWindowListOptionOnScreenOnly
-    const EXCLUDE_DESKTOP: u32 = 2; // kCGWindowListExcludeDesktopElements
+    const ON_SCREEN: i32 = 1; // kCGWindowListOptionOnScreenOnly
+    const EXCLUDE_DESKTOP: i32 = 2; // kCGWindowListExcludeDesktopElements
 
     unsafe {
         let array = CGWindowListCopyWindowInfo(ON_SCREEN | EXCLUDE_DESKTOP, 0);
@@ -412,7 +412,7 @@ fn cf_string_to_rust(value: *const std::ffi::c_void) -> Option<String> {
         fn CFStringGetLength(string: *const std::ffi::c_void) -> u32;
         fn CFStringGetCString(
             string: *const std::ffi::c_void,
-            buffer: *mut i8,
+            buffer: *mut u8,
             size: u32,
             encoding: u32,
         ) -> u32;
@@ -421,7 +421,7 @@ fn cf_string_to_rust(value: *const std::ffi::c_void) -> Option<String> {
     const UTF8: u32 = 0x0800_0100;
     unsafe {
         let length = CFStringGetLength(value) as usize;
-        let mut buffer = vec![0i8; length + 1];
+        let mut buffer = vec![0u8; length + 1];
         let written = CFStringGetCString(value, buffer.as_mut_ptr(), (length + 1) as u32, UTF8);
         if written == 0 {
             return None;
@@ -464,7 +464,7 @@ fn foreground_process_name() -> Option<String> {
     };
 
     let window = unsafe { GetForegroundWindow() };
-    if window == 0 {
+    if window.is_null() {
         return None;
     }
     let mut process_id: u32 = 0;
@@ -477,13 +477,13 @@ fn foreground_process_name() -> Option<String> {
     let handle = unsafe {
         OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id)
     };
-    if handle == 0 {
+    if handle.is_null() {
         return None;
     }
     let mut buffer = [0u16; 261];
     let mut size: u32 = buffer.len() as u32;
     let written = unsafe {
-        QueryFullProcessImageNameW(handle, 0, buffer.as_mut_ptr().cast::<i16>(), &mut size)
+        QueryFullProcessImageNameW(handle, 0, buffer.as_mut_ptr(), &mut size)
     };
     let name = if written == 0 {
         None
