@@ -39,7 +39,12 @@ jobs:
           - os: macos-latest
             target: aarch64-apple-darwin
             bundles: "dmg"
-            macos_signing_identity: "-"
+            # Sign with a real self-signed code-signing certificate (NOT ad-hoc
+            # "-"): macOS 26 classifies ad-hoc apps as "damaged" (no Open
+            # Anyway), while a real cert yields "unidentified developer" ->
+            # System Settings "Open Anyway". Identity name set by the
+            # sign-macos-selfsigned.sh step below.
+            macos_signing_identity: "Banana Hand Self-Signed Dev"
 
     steps:
       - name: Checkout
@@ -72,19 +77,24 @@ jobs:
           cache: npm
 
 
+      - name: Create self-signed code-signing certificate
+        if: matrix.os == 'macos-latest'
+        run: bash scripts/sign-macos-selfsigned.sh
+
       - name: Install frontend dependencies
         run: npm ci
 
       # Runs `beforeBuildCommand` (native-host sidecar + frontend build), then
-      # bundles only the targets valid for this OS. `-` requests ad-hoc signing
-      # on macOS, which keeps the Privacy & Security "Open Anyway" path without
-      # requiring an Apple Developer certificate.
+      # bundles the targets valid for this OS. On macOS the app is signed with
+      # the self-signed code-signing certificate created above (a real cert,
+      # not ad-hoc), so Gatekeeper classifies it as "unidentified developer"
+      # and offers System Settings > Privacy & Security > "Open Anyway".
       - name: Build app + native-host sidecar
         env:
           APPLE_SIGNING_IDENTITY: ${{ matrix.macos_signing_identity }}
         run: npm run tauri -- build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
 
-      - name: Verify macOS app ad-hoc signature inside the DMG
+      - name: Verify macOS app signature inside the DMG
         if: matrix.target == 'aarch64-apple-darwin'
         run: |
           dmg=$(find target/${{ matrix.target }}/release/bundle/dmg -name '*.dmg' -print -quit)
@@ -165,7 +175,7 @@ jobs:
             -o -name '*.zip' -o -name '*.xpi' \
           \) -print0)
           test "${#assets[@]}" -gt 0
-          notes=$'Preview release only: build artifacts are attached, but this release does not claim a supported platform/browser pair. See docs/adr/0003-release-evidence-matrix.md for the required 24-cell real-device evidence matrix.\n\nmacOS (Apple Silicon): the DMG is ad-hoc signed but not notarized (no Apple Developer ID). To open it for the first time, launch the app; when Gatekeeper reports an unidentified developer, choose Done, then open System Settings > Privacy & Security and click Open Anyway. Do not use xattr quarantine removal.\n\nChromium: the extension uses a fixed ID (mooakjhlbkjfbmbmliklkmfmacnomlai) so the native host registers automatically; no manual extension-ID entry is needed.\n\nFirefox: use the temporary ZIP via about:debugging > Load Temporary Add-on (unloads on restart). An AMO-signed XPI (unlisted channel) is attached only when AMO signing secrets are configured.'
+          notes=$'Preview release only: build artifacts are attached, but this release does not claim a supported platform/browser pair. See docs/adr/0003-release-evidence-matrix.md for the required 24-cell real-device evidence matrix.\n\nmacOS (Apple Silicon): the DMG is signed with a self-signed code-signing certificate but not notarized (no Apple Developer ID). To open it the first time, launch the app; when Gatekeeper reports an unidentified developer, choose Done, then open System Settings > Privacy & Security and click Open Anyway. If it instead says the app is damaged and there is no Open Anyway option, clear the quarantine once: xattr -dr com.apple.quarantine "/Applications/Banana Hand.app".\n\nChromium: the extension uses a fixed ID (mooakjhlbkjfbmbmliklkmfmacnomlai) so the native host registers automatically; no manual extension-ID entry is needed.\n\nFirefox: use the temporary ZIP via about:debugging > Load Temporary Add-on; the extension ID bridge@banana-hand.dev is a placeholder because AMO signing is not configured.\n\nLinux: the AppImage bundles the native host at banana-hand-native-host, the .deb installs it at /usr/bin/banana-hand-native-host.\n\nWindows: the Inno Setup installer bundles the native host; the NSIS build is untested, and the app may show an "unknown publisher" SmartScreen warning because no code-signing certificate is configured.\n\nThis is a preview release; please report issues in the tracker.\n'
           if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             gh release edit "${GITHUB_REF_NAME}" \
               --repo "${GITHUB_REPOSITORY}" \
