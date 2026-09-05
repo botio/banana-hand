@@ -1,146 +1,192 @@
 #!/usr/bin/env bash
-# Generate a self-signed Apple code-signing certificate, import it into the
-# login keychain, and print the codesign identity name to stdout.
 #
-# WHY a self-signed cert instead of ad-hoc ("-"):
-# macOS 15+/26 (Tahoe) classifies a *quarantined, ad-hoc-signed* app as
-# "damaged and can't be opened" — that dialog has no Open Anyway path.
-# A *real* X.509 certificate (even one from an untrusted/self CA) is instead
-# classified as "from an unidentified developer," which DOES expose the
-# System Settings > Privacy & Security > "Open Anyway" button. That lets a
-# non-notarized app be approved without a paid Apple Developer ID.
+# Create a self-signed code-signing certificate on a macOS CI runner and
+# install it into the keychain so `codesign --sign "..."` produces a
+# Developer-Identity-style signature (a real X.509 cert with a private key),
+# NOT an ad-hoc one. This is what lets a non-Developer-ID app show up as
+# "unidentified developer" (Open Anyway is available) instead of "damaged".
 #
-# The key is generated fresh on each CI runner (no secret stored), so the
-# cdhash changes per build; users may need to re-approve after an update.
+# macOS's `security import` is strict about the PKCS12 it will accept:
+#   * LibreSSL 3.x / OpenSSL 3 / `cryptography` all emit a *non-standard*
+#     macData (a modern PBKDF2/AES MAC, plus an extra iteration INTEGER),
+#     which `security import` rejects ("MAC verification failed").
+#   * A macData-less PKCS12 is rejected too ("Unknown format in import").
 #
-# PKCS12 import note: OpenSSL 3 / LibreSSL 3.x append a NON-STANDARD
-# iteration-count INTEGER to the macData and use a PBKDF2-style MAC KDF that
-# Apple's `security import` (legacy PKCS12 KDF) rejects with "MAC verification
-# failed." The macData is optional per PKCS#12, so we build the PKCS12 with
-# Python `cryptography`, STRIP the macData, and import the MAC-less file.
+# So we build the standard PKCS12 structure ourselves: keep `cryptography`'s
+# standard `[0]`-EXPLICIT authSafe (key + cert bags), and attach a *standard*
+# macData whose MAC is computed with the **legacy PKCS#12 KDF** (SHA-1, the
+# one macOS actually verifies). Because the exact KDF parameters macOS expects
+# (iteration count, whether it reads the macSalt, BMP vs UTF-8 password) vary
+# by implementation, we emit several candidate PKCS12 files and import the
+# first one `security import` accepts.
+#
+# Run from the repo root on a macOS runner:
+#   bash scripts/sign-macos-selfsigned.sh
+#
+# Requires: openssl (genrsa/req), python3 with `cryptography`.
 set -euo pipefail
 
-CERT_NAME="Banana Hand Self-Signed Dev"
-WORKDIR="$(mktemp -d /tmp/bh-selfsigned.XXXXXX)"
-trap 'rm -rf "${WORKDIR}"' EXIT
-KEYCHAIN="${HOME}/Library/Keychains/login.keychain-db"
+CERT_CN="Banana Hand Self-Signed Dev"
 
-# 1. 2048-bit RSA key.
-openssl genrsa -out "${WORKDIR}/key.pem" 2048
+WORK="$(mktemp -d /tmp/banana-hand-sign.XXXXXX)"
+trap 'rm -rf "$WORK"' EXIT
+KEY="$WORK/key.pem"
+CERT="$WORK/cert.pem"
+# Random, never-persisted password: protects the key bag inside the PKCS12.
+PASS="$(openssl rand -hex 8)"
 
-# 2. Self-signed cert carrying the code-signing extended key usage.
-openssl req -x509 -new -key "${WORKDIR}/key.pem" -sha256 -days 3650 \
-  -out "${WORKDIR}/cert.pem" \
-  -subj "/CN=${CERT_NAME}/O=Banana Hand/OU=Dev" \
-  -addext "basicConstraints=critical,CA:FALSE" \
-  -addext "keyUsage=critical,digitalSignature" \
+echo "==> [1/4] Generating 4096-bit RSA key"
+openssl genrsa -out "$KEY" 4096 >/dev/null 2>&1
+
+echo "==> [2/4] Self-signing the code-signing certificate (10-year validity)"
+openssl req -new -x509 -key "$KEY" -out "$CERT" -days 3650 -sha256 \
+  -subj "/CN=${CERT_CN}" \
   -addext "extendedKeyUsage=codeSigning" \
-  -addext "subjectKeyIdentifier=hash"
+  -addext "keyUsage=digitalSignature" \
+  -addext "basicConstraints=critical,CA:FALSE" >/dev/null 2>&1
 
-# 3. Ensure Python `cryptography` is available.
-if ! python3 -c "import cryptography" >/dev/null 2>&1; then
-  pip3 install --quiet cryptography 2>/dev/null \
-    || python3 -m pip install --quiet cryptography 2>/dev/null \
-    || pip3 install --quiet --break-system-packages cryptography 2>/dev/null \
-    || python3 -m pip install --quiet --break-system-packages cryptography
-fi
-python3 -c "import cryptography" >/dev/null 2>&1 \
-  || { echo "ERROR: could not import Python 'cryptography' on this runner." >&2; exit 1; }
+echo "==> [3/4] Building standard-macData PKCS12 (legacy SHA-1 KDF)"
+python3 - "$PASS" "$KEY" "$CERT" "$WORK" <<'PY'
+import hashlib, hmac, os, sys
 
-# 4. Build the PKCS12 (unencrypted key) and strip the macData so macOS
-#    `security import` can load it without a KDF/MAC check.
-python3 - "${WORKDIR}" <<'PY'
-import sys
-w = sys.argv[1]
-from cryptography.hazmat.primitives.serialization import (
-    load_pem_private_key, NoEncryption, pkcs12,
-)
-try:
-    from cryptography.hazmat.primitives.serialization import (
-        load_pem_x509_certificate,
-    )
-except ImportError:  # older cryptography: loader lives in the x509 module
-    from cryptography import x509
-    load_pem_x509_certificate = x509.load_pem_x509_certificate
+password, key_pem_path, cert_pem_path, out_dir = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 
-key = load_pem_private_key(open(f"{w}/key.pem", "rb").read(), None)
-cert = load_pem_x509_certificate(open(f"{w}/cert.pem", "rb").read())
-p12 = pkcs12.serialize_key_and_certificates(
-    b"Banana Hand Self-Signed Dev", key, cert, None, NoEncryption()
-)
+# ---------- PKCS#12 KDF (RFC 7292 / PKCS#12 B.1.3) ----------
+def _rep(v, n):
+    if n == 0: return b""
+    if not v: return b"\x00" * n
+    return (v * ((n + len(v) - 1) // len(v)))[:n]
 
-# --- strip the macData (optional per PKCS#12; macOS rejects modern MACs) ---
-DIGEST_OIDS = {
-    bytes.fromhex("608648016503040201"),  # SHA-256
-    bytes.fromhex("608648016503040200"),  # SHA-1 (NIST)
-    bytes.fromhex("2b0e03021a"),          # SHA-1
-    bytes.fromhex("2a864886f70d010505"),  # SHA-1 (alt)
-    bytes.fromhex("2a864886f70d010104"),  # MD5
-    bytes.fromhex("2b0e03021d"),          # MD5
-}
-def _tlv(d, off):
+def kdf(password, salt, id_byte, iterations, length=20, hash_name="sha1"):
+    H = getattr(hashlib, hash_name); u = H().digest_size; v = H().block_size
+    D = bytes([id_byte]) * v
+    S = _rep(salt, v * ((len(salt) + v - 1) // v)) if salt else b""
+    P = _rep(password, v * ((len(password) + v - 1) // v)) if password else b""
+    I = bytearray(S + P); out = bytearray()
+    for _ in range((length + u - 1) // u):
+        A = H(D + I).digest()
+        for _ in range(iterations - 1):
+            A = H(A).digest()
+        out += A
+        B = _rep(A, v)
+        for off in range(0, len(I), v):
+            blk = bytearray(I[off:off + v]); carry = 1
+            for j in range(v - 1, -1, -1):
+                val = blk[j] + B[j] + carry
+                blk[j] = val & 0xFF; carry = val >> 8
+            I[off:off + v] = blk
+    return bytes(out[:length])
+
+def mac(pw, salt, iterations, message):
+    return hmac.new(kdf(pw, salt, 3, iterations, 20), message, hashlib.sha1).digest()
+
+def pw_bmp(pw):  return pw.encode("utf-16-be") + b"\x00\x00"
+def pw_utf8(pw): return pw.encode("utf-8")
+
+# ---------- minimal DER ----------
+def der_len(n):
+    if n < 0x80: return bytes([n])
+    b = n.to_bytes((n.bit_length() + 7) // 8, "big")
+    return bytes([0x80 | len(b)]) + b
+
+def der(tag, content): return bytes([tag]) + der_len(len(content)) + content
+
+def parse(d, off):
     tag = d[off]; off += 1
     ln = d[off]; off += 1
     if ln & 0x80:
-        n = ln & 0x7F
-        ln = int.from_bytes(d[off:off + n], "big"); off += n
+        n = ln & 0x7f; ln = int.from_bytes(d[off:off + n], "big"); off += n
     return tag, d[off:off + ln], off + ln
-def _mk(tag, c):
-    ln = len(c)
-    if ln < 0x80:
-        return bytes([tag, ln]) + c
-    n = (ln.bit_length() + 7) // 8
-    return bytes([tag, 0x80 | n]) + ln.to_bytes(n, "big") + c
-def _is_digest_alg(seq):
-    t, c, _ = _tlv(seq, 0)
-    if t != 0x30:
-        return False
-    ot, oc, _ = _tlv(c, 0)
-    return ot == 0x06 and oc in DIGEST_OIDS
-def _is_macdata(seq):
-    t, c, off = _tlv(seq, 0)
-    if t != 0x30 or not _is_digest_alg(c):
-        return False
-    t2, _, off = _tlv(seq, off)
-    if t2 != 0x04:
-        return False
-    if off < len(seq):
-        t3, _, _ = _tlv(seq, off)
-        if t3 not in (0x04, 0x02):
-            return False
-    return True
 
-_, body, _ = _tlv(p12, 0)
-off = 0
-kids = []
-while off < len(body):
-    t, c, off = _tlv(body, off)
-    if t == 0x30 and _is_macdata(c):
-        continue  # drop the macData
-    kids.append((t, c))
-p12 = _mk(0x30, b"".join(_mk(t, c) for t, c in kids))
-open(f"{w}/cert.p12", "wb").write(p12)
-print("MAC-less PKCS12 written:", len(p12), "bytes")
+SHA1_OID = bytes.fromhex("2b0e03021a")  # 1.3.14.3.2.26
+
+def build_macdata(digest, mac_salt):
+    alg = der(0x30, der(0x06, SHA1_OID) + der(0x05, b""))  # DigestAlgorithmIdentifier
+    body = alg + der(0x04, digest)
+    if mac_salt is not None:
+        body += der(0xA0, mac_salt)  # [0] IMPLICIT macSalt
+    return der(0x30, body)
+
+# ---------- build the base PKCS12 with `cryptography` (standard authSafe) ----------
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.serialization import pkcs12, BestAvailableEncryption
+from cryptography.x509 import load_pem_x509_certificate
+
+key = serialization.load_pem_private_key(open(key_pem_path, "rb").read(), password=None)
+cert = load_pem_x509_certificate(open(cert_pem_path, "rb").read())
+p12 = pkcs12.serialize_key_and_certificates(
+    "Banana Hand", key, cert, None, BestAvailableEncryption(password.encode("utf-8"))
+)
+
+# Pull out the standard version INTEGER + the [0]-EXPLICIT authSafe field.
+_, body, _ = parse(p12, 0)
+_, ver, o = parse(body, 0)
+t, authSafe, _ = parse(body, o)
+if t != 0xA0:
+    # Some builds emit the authSafe as a plain SEQUENCE; normalize to [0] EXPLICIT.
+    if t == 0x30:
+        authSafe = der(0xA0, authSafe)
+    else:
+        raise SystemExit(f"unexpected authSafe tag {t:#x}")
+
+# Extract the authSafe *content* (without its [0] tag) for the "content" MAC variant.
+_, authSafe_content, _ = parse(authSafe, 0)
+
+# ---------- emit candidate PKCS12 files ----------
+# (iterations, use_salt, mac_over_field, password_encoding)
+variants = [
+    (2048,   True,  True,  "bmp"),
+    (2048,   True,  False, "bmp"),
+    (2048,   False, True,  "bmp"),
+    (3,      True,  True,  "bmp"),
+    (50000,  True,  True,  "bmp"),
+    (2048,   True,  True,  "utf8"),
+]
+for i, (iterations, use_salt, over_field, pwenc) in enumerate(variants):
+    msg = authSafe if over_field else authSafe_content
+    mac_salt = os.urandom(16) if use_salt else b""
+    pw = pw_bmp(password) if pwenc == "bmp" else pw_utf8(password)
+    mac_bytes = mac(pw, mac_salt, iterations, msg)
+    macData = der(0xA1, build_macdata(mac_bytes, mac_salt if use_salt else None))
+    out = der(0x30, ver + authSafe + macData)
+    path = os.path.join(out_dir, f"v{i}.p12")
+    with open(path, "wb") as f:
+        f.write(out)
+    print(f"  v{i}: iterations={iterations:<6} salt={'yes' if use_salt else 'no ':<3} "
+          f"msg={'field' if over_field else 'content'} pw={pwenc} len={len(out)}")
+print(f"==> wrote {len(variants)} PKCS12 variants")
 PY
 
-# 5. Import into the login keychain and grant codesign access to the key.
-security unlock-keychain -p "" "${KEYCHAIN}" >/dev/null 2>&1 || true
-if ! security import "${WORKDIR}/cert.p12" -k "${KEYCHAIN}" \
-    -T /usr/bin/codesign -T /usr/bin/productsign -P "" -A; then
-  echo "ERROR: security import failed. Current identities:" >&2
-  security find-identity -v -p codesigning >&2 || true
-  echo "PKCS12 head (hex):" >&2
-  xxd "${WORKDIR}/cert.p12" 2>/dev/null | head -4 >&2 || true
-  exit 1
-fi
-security set-key-partition-list -S "apple-tool:,apple:" -k "" -A "${KEYCHAIN}" >/dev/null 2>&1 || true
+echo "==> [4/4] Installing into keychain (trying each variant)"
+# Import the first variant `security import` accepts. A macData whose MAC macOS
+# cannot verify is rejected entirely (nothing is added), so we can safely try
+# each candidate against the same keychain until a real identity appears.
+found=""
+for i in 0 1 2 3 4 5; do
+  f="$WORK/v$i.p12"
+  echo "  trying variant v$i ..."
+  if ! security import -P "$PASS" -A "$f" 2>"$WORK/import-err"; then
+    echo "    import failed: $(head -1 "$WORK/import-err" 2>/dev/null)"
+  fi
+  if security find-identity -p codesigning 2>/dev/null | grep -q "$CERT_CN"; then
+    echo "  ==> identity imported from v$i"
+    found=$i
+    break
+  fi
+done
 
-echo "--- available codesign identities ---"
-security find-identity -v -p codesigning || true
-echo "--- selected identity ---"
-if ! security find-identity -v -p codesigning 2>/dev/null | grep -q "${CERT_NAME}"; then
-  echo "ERROR: '${CERT_NAME}' is not in the codesigning identities after import." >&2
-  echo "The self-signed certificate could not be imported; the build cannot sign." >&2
+if [ -n "$found" ]; then
+  echo "==> Self-signed code-signing identity installed:"
+  security find-identity -p codesigning
+else
+  echo "ERROR: no PKCS12 variant was accepted by security import." >&2
+  echo "--- last import stderr ---" >&2
+  cat "$WORK/import-err" 2>/dev/null >&2 || true
+  echo "--- current identities ---" >&2
+  security find-identity 2>/dev/null >&2 || true
+  echo "--- v0 head (hex) ---" >&2
+  xxd "$WORK/v0.p12" 2>/dev/null | head -20 >&2 || true
   exit 1
 fi
-echo "${CERT_NAME}"
+
+echo "==> Done. codesign --sign \"${CERT_CN}\" is available."
