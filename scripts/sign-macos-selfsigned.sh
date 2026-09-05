@@ -109,11 +109,11 @@ def field(d, off):
 
 SHA1_OID = bytes.fromhex("2b0e03021a")  # 1.3.14.3.2.26
 
-def build_macdata(digest, mac_salt):
+def build_macdata(digest, mac_salt, salt_tag=0xA0):
     alg = der(0x30, der(0x06, SHA1_OID) + der(0x05, b""))  # DigestAlgorithmIdentifier
     body = alg + der(0x04, digest)
     if mac_salt is not None:
-        body += der(0xA0, mac_salt)  # [0] IMPLICIT macSalt
+        body += der(salt_tag, mac_salt)
     return der(0x30, body)
 
 # ---------- build the base PKCS12 with `cryptography` (standard authSafe) ----------
@@ -137,26 +137,26 @@ o, authSafe_field = field(body, o)
 _, authSafe_content, _ = parse(authSafe_field, 0)
 
 # ---------- emit candidate PKCS12 files ----------
-# (iterations, use_salt, mac_over_field, password_encoding)
+# (iterations, use_salt, salt_tag, mac_over_field, password_encoding)
 variants = [
-    (2048,   True,  True,  "bmp"),
-    (2048,   True,  False, "bmp"),
-    (2048,   False, True,  "bmp"),
-    (3,      True,  True,  "bmp"),
-    (50000,  True,  True,  "bmp"),
-    (2048,   True,  True,  "utf8"),
+    (2048,   True,  0xA0,  True,  "bmp"),
+    (2048,   True,  0x04,  True,  "bmp"),
+    (2048,   False, 0x00,  True,  "bmp"),
+    (3,      True,  0x04,  True,  "bmp"),
+    (50000,  True,  0x04,  True,  "bmp"),
+    (2048,   True,  0xA0,  True,  "utf8"),
 ]
-for i, (iterations, use_salt, over_field, pwenc) in enumerate(variants):
+for i, (iterations, use_salt, salt_tag, over_field, pwenc) in enumerate(variants):
     msg = authSafe_field if over_field else authSafe_content
     mac_salt = os.urandom(16) if use_salt else b""
     pw = pw_bmp(password) if pwenc == "bmp" else pw_utf8(password)
     mac_bytes = mac(pw, mac_salt, iterations, msg)
-    macData = build_macdata(mac_bytes, mac_salt if use_salt else None)  # plain SEQUENCE (0x30), no [1]
+    macData = build_macdata(mac_bytes, mac_salt if use_salt else None, salt_tag)
     out = der(0x30, ver_field + authSafe_field + macData)
     path = os.path.join(out_dir, f"v{i}.p12")
     with open(path, "wb") as f:
         f.write(out)
-    print(f"  v{i}: iterations={iterations:<6} salt={'yes' if use_salt else 'no ':<3} "
+    print(f"  v{i}: iter={iterations:<6} salt={('tag%02x' % salt_tag) if use_salt else 'no ':<6} "
           f"msg={'field' if over_field else 'content'} pw={pwenc} len={len(out)}")
 print(f"==> wrote {len(variants)} PKCS12 variants")
 # Diagnostics: is cryptography's RAW output valid, and where does v0 diverge?
@@ -191,6 +191,28 @@ def _fields(label, data):
 
 _fields("raw", p12)
 _fields("v0", open(os.path.join(out_dir, "v0.p12"), "rb").read())
+def _macdata(label, data):
+    try:
+        _, body, _ = parse(data, 0)
+        off = 0
+        last = None
+        while off < len(body):
+            off, last = field(body, off)
+        if last is None or last[0] not in (0x30, 0xA1):
+            print(f"  [{label} macData] last tag={getattr(last,'[0]',None)}")
+            return
+        _, mbody, _ = parse(last, 0)
+        moff = 0
+        parts = []
+        while moff < len(mbody):
+            moff, mfld = field(mbody, moff)
+            parts.append(f"tag={mfld[0]:#04x} len={len(mfld)}")
+        print(f"  [{label} macData internals] " + " | ".join(parts))
+    except Exception as e:
+        print(f"  [{label} macData] error: {e}")
+
+_macdata("raw", p12)
+_macdata("v1", open(os.path.join(out_dir, "v1.p12"), "rb").read())
 _probe("v0", open(os.path.join(out_dir, "v0.p12"), "rb").read(), "v0.p12")
 PY
 
