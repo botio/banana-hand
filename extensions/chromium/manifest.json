@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Banana Hand Browser Bridge",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAulXa+Mn6eqv/lfrqwVhYzwoSmA0ctTvcrLPe37Kam9jY99rYlMhk4hHPHfDmUQK8HtWcghZxhBPU8dcyASjOnJFDsdTAFTAkdY+7U00HcQLLP9uZiq4UHLa1XTNa+iC0Q4m5g/0xXaOrlOO0T46GawcZGciKnRp31RINIyXkW5oJX7kJGqIdY5hW8umj7ZEa4vRpaVVTYEbbGQBUYOzaZ9SVoFogdZn52qboJMmR3wPWv8w3ej3+sj9KGlr9NmIK3xrmHKs8+S8GtjjJ0D0ZKHsBJjSuy9SAF5worKefwNi1cO/dQGaqT2tyrFJz25cL8VCpN30c+TbkBoRywDH+WQIDAQAB",
   "description": "將目前 Chromium profile 的 Browser Tab 回報給 Banana Hand。",
   "icons": {
