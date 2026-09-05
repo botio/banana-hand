@@ -177,6 +177,20 @@ def _probe(label, data, fname):
     print(f"  [{label} hex0:48] {data[:48].hex()}")
 
 _probe("raw-cryptography", p12, "raw.p12")
+def _fields(label, data):
+    try:
+        _, body, _ = parse(data, 0)
+        off = 0
+        parts = []
+        while off < len(body):
+            off, fld = field(body, off)
+            parts.append(f"tag={fld[0]:#04x} len={len(fld)}")
+        print(f"  [{label} top-level] " + " | ".join(parts))
+    except Exception as e:
+        print(f"  [{label} top-level] error: {e}")
+
+_fields("raw", p12)
+_fields("v0", open(os.path.join(out_dir, "v0.p12"), "rb").read())
 _probe("v0", open(os.path.join(out_dir, "v0.p12"), "rb").read(), "v0.p12")
 PY
 
