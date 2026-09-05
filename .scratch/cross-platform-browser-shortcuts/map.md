@@ -32,6 +32,7 @@ Standing preferences:
 - [決定平台封包與支援矩陣](issues/03-platform-artifact-matrix.md): Windows NSIS、Apple Silicon 未簽署 DMG、Linux AppImage + `.deb`；商店 extension、手動桌面更新與 major-version fail-closed。
 - [決定設定持久化與分頁重選規則](issues/07-persistent-preferences-and-session-targets.md): 僅持久化快捷鍵庫；目標與發送狀態皆為 session-only，冷卻隨 App 結束失效，設定 migration 可備份復原。
 - [決定跨平台驗證與發布證據](issues/10-platform-validation-and-release-proof.md): 每個 release 需有 12 個平台／工作階段／browser 配對的實機證據（Chrome–Chrome、Firefox–Firefox、Chrome–Firefox）；Brave 不屬首版支援範圍。
+- [修復 extension 一次連線失聯與快捷鍵逐字輸入](issues/12-extension-auto-reconnect-and-chord-recorder.md): extension 斷線後指數退避自動重試（啟動順序不再重要）、App 依 connected_hosts / last_bridge_rejection 分級診斷並清掉 stale session；快捷鍵組合改為按鍵錄製器（裸 Esc 取消、裸 F 鍵可單獨、其餘須帶修飾鍵），存儲格式不變。
 
 ## Not yet specified
 

@@ -49,19 +49,33 @@ Banana Hand 讓「一個快捷鍵」同時對兩個瀏覽器分頁做動作。�
 1. 開啟 Banana Hand，到「讓 Browser 找到 Host」面板。
 2. 選你的瀏覽器（`Chrome / Chromium` 或 `Firefox`）。
 3. 按「登錄 native host」。兩個 extension 都使用固定 ID，不需要貼任何值。
-4. extension 連線後，App 會自動顯示可選 Browser Tab；若已載入舊版 Chrome extension，請到 `chrome://extensions` 對 Banana Hand 按「重新載入」一次。
+4. extension 連線後，App 會自動顯示可選 Browser Tab。若已載入舊版 Chrome extension，請到 `chrome://extensions` 對 Banana Hand 按「重新載入」一次。
+
+extension 斷線後會自動重試（3 秒起、最多 30 秒間隔），**App 與 browser 的啟動順序不再重要**：
+先開 App、後開 browser，或先開 browser、後開 App，extension 都會等到 native host 可用再完成
+握手。App 重啟後 token 更換，extension 也會在數秒內自動重新握手。
 
 ### 第 4 步：發送
-1. 在「快捷鍵庫」按「新增快捷鍵」，填名稱與組合（例如 `Ctrl+Shift+K`）。
+1. 在「快捷鍵庫」按「新增快捷鍵」，填名稱；組合欄位**點一下再直接按鍵**（例如按住 `Ctrl+Shift` 再按 `K`），
+   不要逐字輸入。裸按 `Esc` 取消錄製；裸 F 鍵（如 `F9`）可以單獨作為快捷鍵，其他主要按鍵必須搭配
+   至少一個修飾鍵。
 2. 在「發送」面板的「目標 01」「目標 02」各選一個已連線的分頁（兩者必須不同）。
 3. 選一個快捷鍵，按「發送快捷鍵」。
 4. App 會依序對兩個分頁盡力送出，並在下方顯示結果。
 
 ### 常見問題
-- **看不到我的分頁**：確認第 2 步插件已啟用、第 3 步已登錄，再重啟 App。
+- **看不到我的分頁**：看 App 上方的連線狀態——它會指出卡在哪一級：
+  - 「尚無 native host 連線」＝ extension 還沒握上：確認 App 正在執行、extension 已載入（載入後若 App 已開著，
+    幾秒內會自動重試成功）、且第 3 步已登錄。
+  - 「native host 已連線，但尚未收到 Browser Tab 快照」＝ extension 的 service worker 可能睡了：
+    到 `chrome://extensions` 對 Banana Hand 按「重新載入」。
+  - 「協定版本不符」＝ App 與 extension 版本不同步：下載同版本 release 的 extension 重新載入。
+- **macOS 第一次連不上**：DMG 的 app 與 sidecar native host 都帶隔離屬性；若 browser 啟不起 native
+  host，先執行 `xattr -dr com.apple.quarantine "/Applications/Banana Hand.app"`（見第 1 步），
+  extension 會自動重試，不需要手動重載。
 - **按下發送沒反應／顯示被拒**：看「發送」下方的結果；若提示權限不足，到系統設定授予輸入權限（macOS 為「輔助功能」）。
 - **快捷鍵沒送達**：這是「盡力發送」，App 只保證「有嘗試」，不保證網站收到（見下方「發送契約」）。
-- **重啟 App 要重選分頁**：設計如此，分頁選取是 session-only。
+- **重啟 App 要重選分頁**：設計如此，分頁選取是 session-only（連線本身會自動恢復）。
 
 ## 本機開發
 

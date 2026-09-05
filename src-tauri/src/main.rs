@@ -33,6 +33,9 @@ pub(crate) struct DispatchCoordinator {
     pub(crate) browser_ports: HashMap<String, Sender<Value>>,
     pub(crate) pending_prepares: HashMap<String, Sender<bridge::PreparedResult>>,
     cooldown_started_at: Option<Instant>,
+    /// The last rejected native-host handshake code (e.g. "protocol_mismatch");
+    /// cleared when a hello succeeds.
+    pub(crate) last_bridge_rejection: Option<String>,
 }
 
 impl DispatchCoordinator {
@@ -48,6 +51,8 @@ impl DispatchCoordinator {
 struct RuntimeSnapshot {
     tabs: Vec<TabMetadata>,
     cooldown_remaining_seconds: u64,
+    connected_hosts: u32,
+    last_bridge_rejection: Option<String>,
 }
 
 #[tauri::command]
@@ -56,6 +61,8 @@ fn runtime_snapshot(state: State<'_, AppState>) -> RuntimeSnapshot {
     RuntimeSnapshot {
         tabs: coordinator.connected_tabs.values().cloned().collect(),
         cooldown_remaining_seconds: coordinator.cooldown_remaining_seconds(),
+        connected_hosts: coordinator.browser_ports.len() as u32,
+        last_bridge_rejection: coordinator.last_bridge_rejection.clone(),
     }
 }
 

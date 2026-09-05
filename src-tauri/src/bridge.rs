@@ -167,18 +167,32 @@ fn serve_host(
     });
 
     let mut input = BufReader::new(stream);
+    let mut registered_key: Option<String> = None;
     loop {
         let mut line = String::new();
         match input.read_line(&mut line) {
-            Ok(0) | Err(_) => return,
+            Ok(0) | Err(_) => break,
             Ok(_) => {
-                let response =
+                let (response, connection_key) =
                     dispatch_inbound(&coordinator, &line, &capability_token, writer.clone());
+                if let Some(key) = connection_key {
+                    registered_key = Some(key);
+                }
                 if writer.send(response).is_err() {
-                    return;
+                    break;
                 }
             }
         }
+    }
+    // The browser session is gone: drop its port registration and the tabs it
+    // reported so the App never offers stale targets.
+    if let Some(key) = &registered_key {
+        let mut coordinator = coordinator.lock();
+        coordinator.browser_ports.remove(key);
+        let prefix = format!("{key}:");
+        coordinator
+            .connected_tabs
+            .retain(|target_key, _| !target_key.starts_with(&prefix));
     }
 }
 
@@ -227,46 +241,79 @@ fn serve_pipe(
         }
     });
 
+    let mut registered_key: Option<String> = None;
     loop {
         let Some(message) = pipe_read_message(pipe) else {
             break;
         };
         let lossy = String::from_utf8_lossy(&message);
         let line = lossy.trim_end_matches('\n');
-        let response = dispatch_inbound(&coordinator, line, &capability_token, writer.clone());
+        let (response, connection_key) =
+            dispatch_inbound(&coordinator, line, &capability_token, writer.clone());
+        if let Some(key) = connection_key {
+            registered_key = Some(key);
+        }
         if writer.send(response).is_err() {
             break;
         }
     }
     close_pipe(pipe);
+    // The browser session is gone: drop its port registration and the tabs it
+    // reported so the App never offers stale targets.
+    if let Some(key) = &registered_key {
+        let mut coordinator = coordinator.lock();
+        coordinator.browser_ports.remove(key);
+        let prefix = format!("{key}:");
+        coordinator
+            .connected_tabs
+            .retain(|target_key, _| !target_key.starts_with(&prefix));
+    }
 }
 
 /// The transport-agnostic message dispatch: parse a `HostBridgeRequest`,
 /// enforce the capability token, and produce a response `Value`.
+///
+/// The second result item is the connection key this message registered
+/// (a successful `hello`), so the serving loop can clean the registration up
+/// when the connection drops.
 fn dispatch_inbound(
     coordinator: &Arc<Mutex<DispatchCoordinator>>,
     line: &str,
     capability_token: &str,
     writer: Sender<Value>,
-) -> Value {
+) -> (Value, Option<String>) {
     match serde_json::from_str::<HostBridgeRequest>(line) {
         Ok(request) if request.capability_token == capability_token => {
             handle_message(coordinator, request.message.message, writer)
         }
         Ok(_) => {
-            json!({ "type": "error", "code": "rejected_disconnected", "detail": "native host capability token invalid" })
+            record_rejection(coordinator, "rejected_disconnected");
+            (
+                json!({ "type": "error", "code": "rejected_disconnected", "detail": "native host capability token invalid" }),
+                None,
+            )
         }
         Err(error) => {
-            json!({ "type": "error", "code": "invalid_message", "detail": error.to_string() })
+            record_rejection(coordinator, "invalid_message");
+            (
+                json!({ "type": "error", "code": "invalid_message", "detail": error.to_string() }),
+                None,
+            )
         }
     }
+}
+
+/// Record the last rejected handshake so the UI can tell the user which
+/// stage of the native-host chain is broken.
+fn record_rejection(coordinator: &Arc<Mutex<DispatchCoordinator>>, code: &str) {
+    coordinator.lock().last_bridge_rejection = Some(code.to_owned());
 }
 
 fn handle_message(
     coordinator: &Arc<Mutex<DispatchCoordinator>>,
     message: Value,
     host_sender: Sender<Value>,
-) -> Value {
+) -> (Value, Option<String>) {
     match message.get("type").and_then(Value::as_str) {
         Some("hello") => match serde_json::from_value::<Hello>(message) {
             Ok(hello)
@@ -277,12 +324,21 @@ fn handle_message(
                     &hello.browser_instance_id,
                     &hello.session_nonce,
                 );
-                coordinator.lock().browser_ports.insert(key, host_sender);
-                json!({ "type": "ack", "protocol_major": PROTOCOL_MAJOR })
+                let mut coordinator = coordinator.lock();
+                coordinator.browser_ports.insert(key.clone(), host_sender);
+                coordinator.last_bridge_rejection = None;
+                (json!({ "type": "ack", "protocol_major": PROTOCOL_MAJOR }), Some(key))
             }
-            Ok(_) => json!({ "type": "error", "code": "protocol_mismatch" }),
+            Ok(_) => {
+                record_rejection(coordinator, "protocol_mismatch");
+                (json!({ "type": "error", "code": "protocol_mismatch" }), None)
+            }
             Err(error) => {
-                json!({ "type": "error", "code": "invalid_message", "detail": error.to_string() })
+                record_rejection(coordinator, "invalid_message");
+                (
+                    json!({ "type": "error", "code": "invalid_message", "detail": error.to_string() }),
+                    None,
+                )
             }
         },
         Some("tabs_snapshot") => match serde_json::from_value::<TabsSnapshot>(message) {
@@ -296,17 +352,27 @@ fn handle_message(
                     if tab.target.browser_instance_id != snapshot.browser_instance_id
                         || tab.target.session_nonce != snapshot.session_nonce
                     {
-                        return json!({ "type": "error", "code": "invalid_message", "detail": "tabs_snapshot and session identity disagree" });
+                        return (
+                            json!({ "type": "error", "code": "invalid_message", "detail": "tabs_snapshot and session identity disagree" }),
+                            None,
+                        );
                     }
                     coordinator
                         .connected_tabs
                         .insert(target_key(&tab.target), tab);
                 }
-                json!({ "type": "ack", "protocol_major": PROTOCOL_MAJOR })
+                (json!({ "type": "ack", "protocol_major": PROTOCOL_MAJOR }), None)
             }
-            Ok(_) => json!({ "type": "error", "code": "invalid_message" }),
+            Ok(_) => {
+                record_rejection(coordinator, "invalid_message");
+                (json!({ "type": "error", "code": "invalid_message" }), None)
+            }
             Err(error) => {
-                json!({ "type": "error", "code": "invalid_message", "detail": error.to_string() })
+                record_rejection(coordinator, "invalid_message");
+                (
+                    json!({ "type": "error", "code": "invalid_message", "detail": error.to_string() }),
+                    None,
+                )
             }
         },
         Some("prepared") => match serde_json::from_value::<PreparedResult>(message) {
@@ -318,15 +384,26 @@ fn handle_message(
                 if let Some(sender) = pending {
                     let _ = sender.send(prepared);
                 }
-                json!({ "type": "ack", "protocol_major": PROTOCOL_MAJOR })
+                (json!({ "type": "ack", "protocol_major": PROTOCOL_MAJOR }), None)
             }
-            Ok(_) => json!({ "type": "error", "code": "invalid_message" }),
+            Ok(_) => {
+                record_rejection(coordinator, "invalid_message");
+                (json!({ "type": "error", "code": "invalid_message" }), None)
+            }
             Err(error) => {
-                json!({ "type": "error", "code": "invalid_message", "detail": error.to_string() })
+                record_rejection(coordinator, "invalid_message");
+                (
+                    json!({ "type": "error", "code": "invalid_message", "detail": error.to_string() }),
+                    None,
+                )
             }
         },
         _ => {
-            json!({ "type": "error", "code": "unsupported_message", "detail": "unsupported native host message type" })
+            record_rejection(coordinator, "unsupported_message");
+            (
+                json!({ "type": "error", "code": "unsupported_message", "detail": "unsupported native host message type" }),
+                None,
+            )
         }
     }
 }

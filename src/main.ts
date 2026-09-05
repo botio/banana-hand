@@ -18,7 +18,12 @@ const app: HTMLElement = root;
 let settings: Settings = { schemaVersion: 1, shortcuts: [] };
 let renderedShortcuts: ShortcutRecord[] | undefined;
 let savingShortcut = false;
-let snapshot: RuntimeSnapshot = { tabs: [], cooldown_remaining_seconds: 0 };
+let snapshot: RuntimeSnapshot = {
+  tabs: [],
+  cooldown_remaining_seconds: 0,
+  connected_hosts: 0,
+  last_bridge_rejection: null,
+};
 let selectedShortcutId: string | undefined;
 let selectedFirstTarget: string | undefined;
 let selectedSecondTarget: string | undefined;
@@ -78,6 +83,84 @@ function normalizeChord(raw: string): string {
   return normalized.join("+");
 }
 
+const CHORD_RECORDING_HINT = "請按下組合鍵；Esc 取消。";
+
+let chordRecorder: HTMLButtonElement | undefined;
+let chordValue: HTMLSpanElement | undefined;
+let chordHint: HTMLSpanElement | undefined;
+let chordHiddenInput: HTMLInputElement | undefined;
+let capturingChord = false;
+
+function mainKeyFromEvent(event: KeyboardEvent):
+  | { name: string; kind: "character" | "function" | "named" }
+  | null {
+  // `event.code` is layout-independent (physical key), matching how the
+  // native input adapter emits chords.
+  if (/^Key[A-Z]$/.test(event.code)) return { name: event.code.slice(3), kind: "character" };
+  if (/^Digit[0-9]$/.test(event.code)) return { name: event.code.slice(5), kind: "character" };
+  if (/^F([1-9]|1[0-9]|2[0-4])$/.test(event.code)) return { name: event.code, kind: "function" };
+  switch (event.key) {
+    case "Enter": return { name: "Enter", kind: "named" };
+    case "Tab": return { name: "Tab", kind: "named" };
+    case " ": return { name: "Space", kind: "named" };
+    case "Escape": return { name: "Esc", kind: "named" };
+    default: return null;
+  }
+}
+
+function setChord(chord: string | null): void {
+  if (!chordHiddenInput || !chordValue) return;
+  chordHiddenInput.value = chord ?? "";
+  chordValue.textContent = chord ?? "請按下快捷鍵組合…";
+  chordRecorder?.classList.toggle("has-value", Boolean(chord));
+}
+
+function beginChordCapture(): void {
+  if (capturingChord || !chordRecorder || !chordHint) return;
+  capturingChord = true;
+  chordHint.textContent = CHORD_RECORDING_HINT;
+  chordRecorder.classList.add("capturing");
+  window.addEventListener("keydown", onChordKeyDown, true);
+}
+
+function endChordCapture(): void {
+  if (!capturingChord) return;
+  capturingChord = false;
+  chordRecorder?.classList.remove("capturing");
+  window.removeEventListener("keydown", onChordKeyDown, true);
+}
+
+function onChordKeyDown(event: KeyboardEvent): void {
+  if (!capturingChord) return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (event.key === "Escape"
+    && !event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey) {
+    endChordCapture();
+    if (chordHint) chordHint.textContent = "";
+    return;
+  }
+  const main = mainKeyFromEvent(event);
+  if (!main) {
+    if (chordHint) chordHint.textContent = "不支援的主要按鍵；請改按 A-Z、0-9、F1-F24、Esc、Enter、Tab 或 Space。";
+    return;
+  }
+  const modifiers = [
+    event.ctrlKey ? "Ctrl" : undefined,
+    event.shiftKey ? "Shift" : undefined,
+    event.altKey ? "Alt" : undefined,
+    event.metaKey ? "Meta" : undefined,
+  ].filter((modifier): modifier is string => modifier !== undefined);
+  if (!modifiers.length && main.kind !== "function") {
+    if (chordHint) chordHint.textContent = "主要按鍵需搭配至少一個修飾鍵（Ctrl / Shift / Alt / Meta）。";
+    return;
+  }
+  const chord = [...modifiers, main.name].join("+");
+  setChord(normalizeChord(chord));
+  endChordCapture();
+  if (chordHint) chordHint.textContent = "";
+}
+
 function selectedShortcut(): ShortcutRecord | undefined {
   return settings.shortcuts.find((shortcut) => shortcut.id === selectedShortcutId);
 }
@@ -118,7 +201,13 @@ function mount(): void {
           <div id="shortcut-list" class="shortcut-list" role="radiogroup" aria-label="選取本次發送的快捷鍵"></div>
           <form id="shortcut-form" class="shortcut-form">
             <label>快捷鍵名稱<input name="name" required maxlength="48" placeholder="例如：部署確認" /></label>
-            <label>快捷鍵組合<input name="chord" required maxlength="32" placeholder="例如：Ctrl+Shift+K" /></label>
+            <label>快捷鍵組合
+              <button type="button" class="chord-recorder" id="chord-recorder" aria-label="快捷鍵組合">
+                <span id="chord-recorder-value">請按下快捷鍵組合…</span>
+              </button>
+              <input name="chord" type="hidden" />
+              <span class="chord-recorder-hint" id="chord-recorder-hint" role="status"></span>
+            </label>
             <button type="submit">新增快捷鍵</button>
           </form>
         </section>
@@ -150,6 +239,7 @@ function mount(): void {
         <p class="contract">
           Browser 透過 native messaging 機制啟動 native host；native host 再經 OS-user IPC
           連回桌面 App。選擇 browser 後登錄 native host，extension 連線後會自動回報可選分頁。
+          extension 斷線後會自動重試（3–30 秒間隔），App 與 browser 的啟動順序不再重要。
         </p>
         <div class="native-host-form">
           <label>
@@ -181,6 +271,15 @@ function mount(): void {
   nativeHostSelect.addEventListener("change", () => {
     nativeHostBrowser = nativeHostSelect.value as "chrome" | "firefox";
   });
+  chordRecorder = requireElement<HTMLButtonElement>("#chord-recorder");
+  chordValue = requireElement<HTMLSpanElement>("#chord-recorder-value");
+  chordHint = requireElement<HTMLSpanElement>("#chord-recorder-hint");
+  chordHiddenInput = requireElement<HTMLInputElement>('#shortcut-form input[name="chord"]');
+  chordRecorder.addEventListener("click", (event) => {
+    event.preventDefault();
+    beginChordCapture();
+  });
+  chordRecorder.addEventListener("blur", () => endChordCapture());
   requireElement<HTMLFormElement>("#shortcut-form").addEventListener("submit", addShortcut);
   requireElement<HTMLButtonElement>("#nh-register").addEventListener("click", registerNativeHost);
 }
@@ -301,6 +400,7 @@ async function addShortcut(event: SubmitEvent): Promise<void> {
     if (currentValues.get("name") === values.get("name")
       && currentValues.get("chord") === values.get("chord")) {
       form.reset();
+      setChord(null);
     }
     statusMessage = `已儲存「${name}」。`;
   } catch (error) {
@@ -354,12 +454,26 @@ function formatOutcome(outcome: DispatchOutcome): string {
   return "已嘗試發送；此結果不代表快捷鍵已送達。";
 }
 
+const BRIDGE_REJECTION_TEXT: Record<string, string> = {
+  rejected_disconnected: "capability token 已失效（通常因為 App 重新啟動；extension 會自動重試）。",
+  protocol_mismatch: "協定版本不符（請載入與 App 同版本的 extension）。",
+  invalid_message: "native host 送來無法解析的訊息（extension 會自動重試）。",
+  unsupported_message: "native host 送來不支援的訊息（請重新載入 extension）。",
+};
+
 async function refreshRuntime(): Promise<void> {
   try {
     snapshot = await invoke<RuntimeSnapshot>("runtime_snapshot");
-    statusMessage = snapshot.tabs.length
-      ? `已連線 ${snapshot.tabs.length} 個可選 Browser Tab。`
-      : "尚無已連線 Browser Tab；安裝 extension 後重新選擇目標。";
+    if (snapshot.tabs.length) {
+      statusMessage = `已連線 ${snapshot.tabs.length} 個可選 Browser Tab。`;
+    } else if (snapshot.connected_hosts === 0) {
+      const rejection = snapshot.last_bridge_rejection
+        ? `最近一次 native host 握手被拒絕：${BRIDGE_REJECTION_TEXT[snapshot.last_bridge_rejection] ?? snapshot.last_bridge_rejection}。`
+        : "";
+      statusMessage = `尚無 native host 連線。請確認 App 已啟動、extension 已載入、且已在此 App 登錄 native host。${rejection}`;
+    } else {
+      statusMessage = `native host 已連線（${snapshot.connected_hosts} 個 session），但尚未收到 Browser Tab 快照；請重新載入 extension。`;
+    }
   } catch {
     statusMessage = "此網頁預覽未連接 Tauri 桌面協調器；啟動 App 後才可讀取 Browser Tab。";
   }

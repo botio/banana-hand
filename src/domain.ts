@@ -32,6 +32,8 @@ export interface Settings {
 export interface RuntimeSnapshot {
   tabs: TabMetadata[];
   cooldown_remaining_seconds: number;
+  connected_hosts: number;
+  last_bridge_rejection: string | null;
 }
 
 export type DispatchOutcome =

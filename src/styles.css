@@ -34,6 +34,10 @@ h2 { font-size: 28px; }
 label { display: grid; gap: 7px; font-size: 13px; font-weight: 700; }
 input, select { width: 100%; border: 1px solid #8d8477; border-radius: 8px; padding: 10px 11px; background: #fffdf7; color: #201f1d; }
 .shortcut-form button { border: 0; border-radius: 8px; padding: 11px 14px; background: #ae4b1c; color: white; font-weight: 800; }
+.chord-recorder { width: 100%; border: 1px solid #8d8477; border-radius: 8px; padding: 10px 11px; background: #fffdf7; color: #201f1d; font: inherit; text-align: left; }
+.chord-recorder span { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.chord-recorder.capturing { border-color: #ae4b1c; background: #fdeedd; }
+.chord-recorder-hint { font-size: 12px; font-weight: 400; color: #685f52; min-height: 16px; }
 .contract { max-width: 58ch; color: #bdc6be; line-height: 1.6; }
 .targets { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 28px 0 16px; }
 .targets label { color: #dce4dd; }

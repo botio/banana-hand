@@ -1,11 +1,15 @@
 const BROWSER_KIND = "firefox";
 const NATIVE_HOST_NAME = "dev.bananahand.dispatch_host";
 const INSTANCE_KEY = "browserInstanceId";
+const RECONNECT_BASE_MS = 3000;
+const RECONNECT_MAX_MS = 30000;
 
 let nativePort;
 let sessionNonce = crypto.randomUUID();
 let browserInstanceId;
 let generation = 0;
+let reconnectDelayMs = RECONNECT_BASE_MS;
+let reconnectTimer;
 
 async function ensureBrowserInstanceId() {
   const saved = await browser.storage.local.get(INSTANCE_KEY);
@@ -47,6 +51,7 @@ async function prepareTarget(message) {
     nativePort.postMessage({ type: "prepared", request_id: message.request_id, ready: false, code: "rejected_stale" });
     return;
   }
+
   try {
     const tab = await browser.tabs.get(target.tab_id);
     if (tab.windowId !== target.window_id) throw new Error("tab 已不屬於預期視窗");
@@ -65,12 +70,30 @@ async function prepareTarget(message) {
 }
 
 function connectNativeHost() {
-  nativePort = browser.runtime.connectNative(NATIVE_HOST_NAME);
-  nativePort.onDisconnect.addListener(() => { nativePort = undefined; });
-  nativePort.onMessage.addListener((message) => {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = undefined;
+  }
+  const port = browser.runtime.connectNative(NATIVE_HOST_NAME);
+  nativePort = port;
+  port.onMessage.addListener((message) => {
+    // Any message from the host proves the bridge is alive; reset backoff so a
+    // later drop retries quickly.
+    reconnectDelayMs = RECONNECT_BASE_MS;
     if (message.type === "prepare") void prepareTarget(message);
+    if (message.type === "error") {
+      // The handshake was rejected (stale capability token after an app
+      // restart, or a protocol mismatch). Tearing the port down makes the
+      // retry loop relaunch the host, which re-reads the fresh bridge.json.
+      port.disconnect();
+    }
   });
-  nativePort.postMessage({
+  port.onDisconnect.addListener(() => {
+    if (nativePort !== port) return;
+    nativePort = undefined;
+    scheduleReconnect();
+  });
+  port.postMessage({
     type: "hello",
     request_id: crypto.randomUUID(),
     protocol_major: 1,
@@ -79,6 +102,18 @@ function connectNativeHost() {
     session_nonce: sessionNonce,
   });
   void sendSnapshot();
+}
+
+function scheduleReconnect() {
+  // The desktop app may not be running yet, or it may have restarted and
+  // rotated its capability token. Retrying with backoff means the order in
+  // which the app and the browser are started no longer matters.
+  if (reconnectTimer) return;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = undefined;
+    if (!nativePort) connectNativeHost();
+  }, reconnectDelayMs);
+  reconnectDelayMs = Math.min(reconnectDelayMs * 2, RECONNECT_MAX_MS);
 }
 
 function scheduleSnapshot() {
@@ -95,6 +130,11 @@ browser.tabs.onDetached.addListener(scheduleSnapshot);
 browser.windows.onRemoved.addListener(scheduleSnapshot);
 browser.runtime.onStartup.addListener(() => {
   sessionNonce = crypto.randomUUID();
+  reconnectDelayMs = RECONNECT_BASE_MS;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = undefined;
+  }
   void ensureBrowserInstanceId().then(connectNativeHost);
 });
 

@@ -28,21 +28,41 @@ test.beforeEach(async ({ page }) => {
   await page.goto(url);
 });
 
-test("typing and text selection survive background runtime refreshes", async ({ page }) => {
+// The chord field is a capture control, not a text box: the test must drive
+// it with real keyboard events the way a user does (click to record, then
+// keys). Playwright modifier names differ from the chord vocabulary.
+const MODIFIER_PLAYWRIGHT = { Ctrl: "Control", Shift: "Shift", Alt: "Alt", Meta: "Meta" };
+
+async function recordChord(page, combo) {
+  const recorder = page.getByRole("button", { name: "快捷鍵組合" });
+  const segments = combo.split("+");
+  const modifiers = segments.slice(0, -1);
+  const key = segments.at(-1);
+  await recorder.click();
+  for (const modifier of modifiers) await page.keyboard.down(MODIFIER_PLAYWRIGHT[modifier]);
+  await page.keyboard.press(key);
+  for (const modifier of modifiers) await page.keyboard.up(MODIFIER_PLAYWRIGHT[modifier]);
+}
+
+test("recording a chord and typing survive background runtime refreshes", async ({ page }) => {
   const name = page.getByRole("textbox", { name: "快捷鍵名稱" });
-  const chord = page.getByRole("textbox", { name: "快捷鍵組合" });
+  const chordValue = page.locator("#chord-recorder-value");
+  const hidden = page.locator('input[name="chord"]');
+
   await name.fill("Deployment");
   await page.clock.runFor(1_100);
   await page.keyboard.type(" confirmation");
   await expect(name).toHaveValue("Deployment confirmation");
   await expect(name).toBeFocused();
 
-  await chord.fill("Ctrl+Shift+K");
-  await chord.evaluate((input) => input.setSelectionRange(5, 10));
+  await recordChord(page, "Ctrl+Shift+K");
+  await expect(chordValue).toHaveText("Ctrl+Shift+K");
+  await expect(hidden).toHaveValue("Ctrl+Shift+K");
+
+  // The 1s polling refresh must not touch the committed chord or the draft.
   await page.clock.runFor(2_100);
-  await page.keyboard.type("Alt");
-  await expect(chord).toHaveValue("Ctrl+Alt+K");
-  await expect(chord).toBeFocused();
+  await expect(chordValue).toHaveText("Ctrl+Shift+K");
+  await expect(hidden).toHaveValue("Ctrl+Shift+K");
   await expect(name).toHaveValue("Deployment confirmation");
 });
 
@@ -63,6 +83,40 @@ test("Chinese IME composition survives a runtime refresh", async ({ page }) => {
   } finally {
     await cdp.detach();
   }
+});
+
+test("the chord recorder rejects bare keys, commits real combos, and cancels on Escape", async ({ page }) => {
+  const recorder = page.getByRole("button", { name: "快捷鍵組合" });
+  const chordValue = page.locator("#chord-recorder-value");
+  const hint = page.locator("#chord-recorder-hint");
+
+  await recorder.click();
+  await expect(hint).toHaveText("請按下組合鍵；Esc 取消。");
+
+  // A bare letter has no modifier: rejected, capture stays open.
+  await page.keyboard.press("KeyK");
+  await expect(hint).toHaveText("主要按鍵需搭配至少一個修飾鍵（Ctrl / Shift / Alt / Meta）。");
+  await expect(chordValue).toHaveText("請按下快捷鍵組合…");
+
+  // The same capture accepts a real combo.
+  await page.keyboard.down("Control");
+  await page.keyboard.down("Shift");
+  await page.keyboard.press("KeyK");
+  await page.keyboard.up("Control");
+  await page.keyboard.up("Shift");
+  await expect(hint).toHaveText("");
+  await expect(chordValue).toHaveText("Ctrl+Shift+K");
+
+  // A bare F-key is a legitimate stand-alone shortcut.
+  await recordChord(page, "F9");
+  await expect(chordValue).toHaveText("F9");
+
+  // Re-capturing and pressing bare Escape cancels without changing the value.
+  await recorder.click();
+  await expect(hint).toHaveText("請按下組合鍵；Esc 取消。");
+  await page.keyboard.press("Escape");
+  await expect(hint).toHaveText("");
+  await expect(chordValue).toHaveText("F9");
 });
 
 test("a draft typed during a pending save is not reset when the save settles", async ({ page }) => {
@@ -96,7 +150,12 @@ test("a draft typed during a pending save is not reset when the save settles", a
             return null;
           }
           case "runtime_snapshot":
-            return { tabs: [], cooldown_remaining_seconds: 0 };
+            return {
+              tabs: [],
+              cooldown_remaining_seconds: 0,
+              connected_hosts: 0,
+              last_bridge_rejection: null,
+            };
           default:
             throw new Error(`unexpected command ${command}`);
         }
@@ -106,13 +165,13 @@ test("a draft typed during a pending save is not reset when the save settles", a
   await page.goto(url);
 
   const name = page.getByRole("textbox", { name: "快捷鍵名稱" });
-  const chord = page.getByRole("textbox", { name: "快捷鍵組合" });
+  const chordValue = page.locator("#chord-recorder-value");
   const button = page.getByRole("button", { name: "新增快捷鍵" });
 
-  await expect(page.locator("#connection-status")).toContainText("Browser Tab");
+  await expect(page.locator("#connection-status")).toContainText("尚無 native host 連線");
 
   await name.fill("慢存確認");
-  await chord.fill("F9");
+  await recordChord(page, "F9");
   await page.evaluate(() => {
     window.__TAURI_TEST__.holdSave = true;
   });
@@ -121,13 +180,13 @@ test("a draft typed during a pending save is not reset when the save settles", a
   // The write is still pending: submits are locked, the committed draft is untouched.
   await expect(button).toBeDisabled();
   await expect(name).toHaveValue("慢存確認");
-  await expect(chord).toHaveValue("F9");
+  await expect(chordValue).toHaveText("F9");
 
-  // The user types a newer draft while the save is still in flight.
+  // The user records a newer draft while the save is still in flight.
   await name.fill("下一筆草稿");
-  await chord.fill("Ctrl+F10");
+  await recordChord(page, "Ctrl+F10");
   await expect(name).toHaveValue("下一筆草稿");
-  await expect(chord).toHaveValue("Ctrl+F10");
+  await expect(chordValue).toHaveText("Ctrl+F10");
   await expect(button).toBeDisabled();
 
   // The save settles: the committed shortcut lands in the list, and the newer
@@ -137,5 +196,5 @@ test("a draft typed during a pending save is not reset when the save settles", a
   await expect(page.locator("#connection-status")).toContainText("已儲存「慢存確認」");
   await expect(page.locator("#shortcut-list")).toContainText("慢存確認");
   await expect(name).toHaveValue("下一筆草稿");
-  await expect(chord).toHaveValue("Ctrl+F10");
+  await expect(chordValue).toHaveText("Ctrl+F10");
 });
