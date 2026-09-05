@@ -263,7 +263,7 @@ fn send_macos(chord: &ShortcutChord) -> Result<(), InputError> {
     #[link(name = "CoreFoundation", kind = "framework")]
     unsafe extern "C" {
         fn AXIsProcessTrustedWithOptions(options: *const c_void) -> bool;
-        fn CFBooleanCreate(value: bool) -> *const c_void;
+        static kCFBooleanTrue: *const c_void;
         fn CFStringCreateWithCString(encoding: u32, string: *const u8) -> *const c_void;
         fn CFDictionaryCreate(
             info: *const c_void,
@@ -279,14 +279,13 @@ fn send_macos(chord: &ShortcutChord) -> Result<(), InputError> {
     unsafe {
         let key =
             CFStringCreateWithCString(0x0800_0100, b"kAXTrustedCheckOptionPrompt\0".as_ptr());
-        let prompt = CFBooleanCreate(true);
+        let prompt: *const c_void = kCFBooleanTrue;
         let keys = [key];
         let values = [prompt];
         let options = CFDictionaryCreate(std::ptr::null(), keys.as_ptr(), values.as_ptr(), 1);
         let trusted = AXIsProcessTrustedWithOptions(options);
         CFRelease(options);
         CFRelease(key);
-        CFRelease(prompt);
         if !trusted {
             return Err(InputError::AccessibilityPermissionRequired);
         }
