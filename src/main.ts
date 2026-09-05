@@ -473,8 +473,14 @@ const BRIDGE_REJECTION_TEXT: Record<string, string> = {
 async function refreshRuntime(): Promise<void> {
   try {
     snapshot = await invoke<RuntimeSnapshot>("runtime_snapshot");
+    // The sidecar self-check must be visible in every branch: the bridge
+    // can be broken even while a stale host is still attached, and it is
+    // the first thing to look at when a browser stops connecting.
+    const selfCheck = snapshot.host_self_check
+      ? `native host self-check：${snapshot.host_self_check}。`
+      : "";
     if (snapshot.tabs.length) {
-      statusMessage = `已連線 ${snapshot.tabs.length} 個可選 Browser Tab。`;
+      statusMessage = `已連線 ${snapshot.tabs.length} 個可選 Browser Tab。` + selfCheck;
     } else if (snapshot.connected_hosts === 0) {
       const rejection = snapshot.last_bridge_rejection
         ? `最近一次 native host 握手被拒絕：${BRIDGE_REJECTION_TEXT[snapshot.last_bridge_rejection] ?? snapshot.last_bridge_rejection}。`
@@ -482,16 +488,13 @@ async function refreshRuntime(): Promise<void> {
       const extReason = snapshot.last_host_disconnect_reason
         ? `最近一次 extension 回報：${snapshot.last_host_disconnect_reason}。`
         : "";
-      const selfCheck = snapshot.host_self_check
-        ? `native host self-check：${snapshot.host_self_check}。`
-        : "";
-      statusMessage =
+      const statusBase =
         "尚無 native host 連線。App 已自動把 native host 登錄到 Chrome（stable／Beta／Canary）、Chromium、Firefox 各自的目錄；請確認 extension 已載入。"
         + rejection
-        + extReason
-        + selfCheck;
+        + extReason;
+      statusMessage = statusBase + selfCheck;
     } else {
-      statusMessage = `native host 已連線（${snapshot.connected_hosts} 個 session），但尚未收到 Browser Tab 快照；請重新載入 extension。`;
+      statusMessage = `native host 已連線（${snapshot.connected_hosts} 個 session），但尚未收到 Browser Tab 快照；請重新載入 extension。` + selfCheck;
     }
   } catch {
     statusMessage = "此網頁預覽未連接 Tauri 桌面協調器；啟動 App 後才可讀取 Browser Tab。";

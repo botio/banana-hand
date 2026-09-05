@@ -14,6 +14,18 @@ let reconnectTimer;
 // "Native messaging host not found"), reported in the next hello so the App
 // can show it when no host is connected.
 let lastDisconnectReason;
+// Sends to the live port. nativePort can be cleared between an await and
+// the post (the host dies mid-call), and some builds throw when posting on
+// an already-closed port; both must stay silent, because onDisconnect
+// already reschedules the retry.
+function post(message) {
+  if (!nativePort) return;
+  try {
+    nativePort.postMessage(message);
+  } catch {
+    // The port closed between the check and the post.
+  }
+}
 
 async function ensureBrowserInstanceId() {
   const saved = await browser.storage.local.get(INSTANCE_KEY);
@@ -38,7 +50,7 @@ async function sendSnapshot() {
       title: tab.title ?? "",
       url: tab.url,
     })));
-  nativePort.postMessage({
+  post({
     type: "tabs_snapshot",
     request_id: crypto.randomUUID(),
     browser_instance_id: browserInstanceId,
@@ -52,7 +64,7 @@ async function prepareTarget(message) {
   if (target.browser !== BROWSER_KIND
     || target.browser_instance_id !== browserInstanceId
     || target.session_nonce !== sessionNonce) {
-    nativePort.postMessage({ type: "prepared", request_id: message.request_id, ready: false, code: "rejected_stale" });
+    post({ type: "prepared", request_id: message.request_id, ready: false, code: "rejected_stale" });
     return;
   }
 
@@ -61,9 +73,9 @@ async function prepareTarget(message) {
     if (tab.windowId !== target.window_id) throw new Error("tab 已不屬於預期視窗");
     await browser.tabs.update(target.tab_id, { active: true });
     await browser.windows.update(target.window_id, { focused: true });
-    nativePort.postMessage({ type: "prepared", request_id: message.request_id, ready: true });
+    post({ type: "prepared", request_id: message.request_id, ready: true });
   } catch (error) {
-    nativePort.postMessage({
+    post({
       type: "prepared",
       request_id: message.request_id,
       ready: false,
@@ -107,9 +119,10 @@ function connectNativeHost() {
     if (browser.runtime.lastError) {
       lastDisconnectReason = String(browser.runtime.lastError.message ?? browser.runtime.lastError);
     }
+    console.warn("[banana-hand] native host connect failed:", lastDisconnectReason);
     scheduleReconnect();
   });
-  port.postMessage({
+  post({
     type: "hello",
     request_id: crypto.randomUUID(),
     protocol_major: 1,

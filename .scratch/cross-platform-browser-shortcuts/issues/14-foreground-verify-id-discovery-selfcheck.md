@@ -105,3 +105,34 @@ null buffer + max 0 先量出精確 UTF-8 位元組長再分配 buffer）。
 窗口永遠「不匹配」，前景驗證在 macOS 上必然 fail-closed。所有 CF 符號
 已逐一對照 `core-foundation-sys`（本機 cargo registry 內的官方綁定
 轉寫）確認存在且簽名一致。
+
+## v0.1.6：extension 競態 + self-check 可見性
+
+使用者回報（v0.1.5 版）：(1) Chrome console 大量
+`TypeError: Cannot read properties of undefined (reading 'postMessage') at
+sendSnapshot`；(2) 重啟 App 後 Firefox 不會自動連上。
+
+**Race**：`sendSnapshot`／`prepareTarget` 的 guard 只在函式頂部（await
+之前）檢查 `nativePort`；`await chrome.windows.getAll()`／`tabs.get`
+期間 host 死掉 → onDisconnect 把 `nativePort` 設 undefined → await 恢復
+後 `nativePort.postMessage` 對 undefined 呼叫 → 未捕獲 rejection（即
+使用者看到的 TypeError 暴增；prepareTarget 同一 race 會讓 `prepared`
+訊息送不出去、App 端等不到而超時——可能是「發送請求失敗」的來源之一）。
+修法：新增 `post(message)` helper（先查 `nativePort`、try/catch 包住
+postMessage——部分 browser build 對已關閉 port 的 postMessage 會丟
+exception），所有 postMessage 呼叫點（snapshot、prepared ×3、hello）改走
+helper；onDisconnect 的重試排程不變。另給 Firefox onDisconnect 補上與
+Chrome 相同的 `console.warn`（之前 Firefox 把 `lastDisconnectReason`
+只存進變數、使用者完全無從看見 port 為什麼死）。
+
+**Self-check 可見性**：App 狀態列只在「尚無 native host 連線」分支顯示
+`native host self-check：…`——host 已連線（例如 stale port 還掛著）時
+完全看不到，剛好遮蔽「App 端 bridge 壞了但 extension 還連著」這類故障
+（本次 Firefox 重啟不連線的診斷就被它卡住）。修法：`refreshRuntime`
+把 self-check 字串提到 if-chain 之前、三個分支（有 Tab、0 host、有 host
+無 Tab）一律附上。
+
+Chrome「Specified native messaging host not found」且 manifest／ID 全部
+正確時，指向 Chrome browser process 從未完整重啟（host 清單只在
+browser process 啟動時讀取）——v0.1.6 不改此路徑，靠上面的自我診斷
+行 + 使用者完整重啟 Chrome 驗證。
