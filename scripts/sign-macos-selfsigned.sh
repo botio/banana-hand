@@ -284,23 +284,33 @@ echo "==> [4/4] Installing into keychain (trying each variant)"
 # `security import` here takes the input file first, then options; -P reads the
 # password from a file, so write the (random) password to a temp file once.
 printf '%s' "$PASS" > "$WORK/passfile"
+printf '%s\n' "$PASS" > "$WORK/passfile_nl"
 security unlock-keychain -p "" 2>/dev/null || true
 found=""
-# libressl (native LibreSSL export, legacy KDF) first, then the cryptography
-# patches, then the raw cryptography file for reference.
-names=("libressl" "v0" "v1" "v2" "v3" "v4" "v5")
-for i in "${!names[@]}"; do
-  n="${names[$i]}"
-  f="$WORK/$n.p12"
-  echo "  trying $n ..."
-  if ! security import "$f" -T /usr/bin/codesign -P "$WORK/passfile" -A 2>"$WORK/import-err"; then
-    echo "    $n import failed: $(head -1 "$WORK/import-err" 2>/dev/null)"
+
+# Import one PKCS12 with the given `security import` options; report success.
+# Always returns 0 so a failing import does not abort (set -e).
+try_import() {
+  local f="$1" label="$2"
+  shift 2
+  if ! security import "$f" -T /usr/bin/codesign "$@" -A 2>"$WORK/import-err"; then
+    echo "    $label: import failed: $(head -1 "$WORK/import-err" 2>/dev/null)"
   fi
   if security find-identity -p codesigning 2>/dev/null | grep -q "$CERT_CN"; then
-    echo "  ==> identity imported from $n"
-    found="$n"
-    break
+    echo "  ==> identity imported via: $label"
+    found="$label"
   fi
+  return 0
+}
+
+echo "  [libressl - native LibreSSL legacy-KDF PKCS12]"
+if [ -z "$found" ]; then try_import "$WORK/libressl.p12" "libressl / -P file(no nl)" -P "$WORK/passfile"; fi
+if [ -z "$found" ]; then try_import "$WORK/libressl.p12" "libressl / -P file(+nl)" -P "$WORK/passfile_nl"; fi
+if [ -z "$found" ]; then try_import "$WORK/libressl.p12" "libressl / -p direct" -p "$PASS"; fi
+
+echo "  [cryptography-derived patches]"
+for n in v0 v1 v2 v3 v4 v5; do
+  if [ -z "$found" ]; then try_import "$WORK/$n.p12" "$n / -P file(no nl)" -P "$WORK/passfile"; fi
 done
 
 if [ -n "$found" ]; then
