@@ -127,19 +127,13 @@ p12 = pkcs12.serialize_key_and_certificates(
     "Banana Hand".encode("utf-8"), key, cert, None, BestAvailableEncryption(password.encode("utf-8"))
 )
 
-# Pull out the raw version field and the [0]-EXPLICIT authSafe field, keeping
-# their tags+lengths so the reassembled PKCS12 stays valid DER.
+# Keep the version and authSafe fields byte-identical to cryptography's valid
+# output; only the macData is replaced (re-wrapping the authSafe corrupts it).
 _, body, _ = parse(p12, 0)
 o = 0
 o, ver_field = field(body, o)
 o, authSafe_field = field(body, o)
-if authSafe_field[0] != 0xA0:
-    # Some builds emit the authSafe as a plain SEQUENCE; normalize to [0] EXPLICIT.
-    if authSafe_field[0] == 0x30:
-        authSafe_field = der(0xA0, authSafe_field[1:])
-    else:
-        raise SystemExit(f"unexpected authSafe tag {authSafe_field[0]:#x}")
-# authSafe content (without its [0] tag) for the "content" MAC variant.
+# authSafe content (for the "content" MAC variant); works for [0] or plain alike.
 _, authSafe_content, _ = parse(authSafe_field, 0)
 
 # ---------- emit candidate PKCS12 files ----------
@@ -195,15 +189,19 @@ echo "==> [4/4] Installing into keychain (trying each variant)"
 printf '%s' "$PASS" > "$WORK/passfile"
 security unlock-keychain -p "" 2>/dev/null || true
 found=""
-for i in 0 1 2 3 4 5; do
-  f="$WORK/v$i.p12"
-  echo "  trying variant v$i ..."
+# Try the RAW cryptography file first (decisive: shows macOS's verdict on the
+# authSafe structure), then the standard-macData variants.
+names=("raw" "v0" "v1" "v2" "v3" "v4" "v5")
+for i in "${!names[@]}"; do
+  n="${names[$i]}"
+  f="$WORK/$n.p12"
+  echo "  trying $n ..."
   if ! security import "$f" -T /usr/bin/codesign -P "$WORK/passfile" -A 2>"$WORK/import-err"; then
-    echo "    import failed: $(head -1 "$WORK/import-err" 2>/dev/null)"
+    echo "    $n import failed: $(head -1 "$WORK/import-err" 2>/dev/null)"
   fi
   if security find-identity -p codesigning 2>/dev/null | grep -q "$CERT_CN"; then
-    echo "  ==> identity imported from v$i"
-    found=$i
+    echo "  ==> identity imported from $n"
+    found="$n"
     break
   fi
 done
