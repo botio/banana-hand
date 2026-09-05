@@ -165,19 +165,25 @@ for i, (iterations, use_salt, over_field, pwenc) in enumerate(variants):
     print(f"  v{i}: iterations={iterations:<6} salt={'yes' if use_salt else 'no ':<3} "
           f"msg={'field' if over_field else 'content'} pw={pwenc} len={len(out)}")
 print(f"==> wrote {len(variants)} PKCS12 variants")
-# Diagnostic: can LibreSSL's parser read the structure we built? (helps tell
-# "bad DER" from "macOS rejects valid PKCS12" if the import still fails.)
+# Diagnostics: is cryptography's RAW output valid, and where does v0 diverge?
 import subprocess
-try:
-    r = subprocess.run(
-        ["openssl", "pkcs12", "-info", "-in", os.path.join(out_dir, "v0.p12"),
-         "-passin", f"pass:{password}", "-nodes"],
-        capture_output=True, text=True, timeout=30)
-    print(f"  [openssl pkcs12 -info v0] rc={r.returncode}")
-    for line in (r.stdout + r.stderr).splitlines()[:16]:
-        print("   |", line)
-except Exception as e:
-    print("  [openssl pkcs12 -info v0] error:", e)
+def _probe(label, data, fname):
+    p = os.path.join(out_dir, fname)
+    with open(p, "wb") as fh:
+        fh.write(data)
+    try:
+        r = subprocess.run(
+            ["openssl", "pkcs12", "-info", "-in", p, "-passin", f"pass:{password}"],
+            capture_output=True, text=True, timeout=30)
+        print(f"  [openssl -info {label}] rc={r.returncode}")
+        for line in (r.stdout + r.stderr).splitlines()[:8]:
+            print("   |", line)
+    except Exception as e:
+        print(f"  [openssl -info {label}] error: {e}")
+    print(f"  [{label} hex0:48] {data[:48].hex()}")
+
+_probe("raw-cryptography", p12, "raw.p12")
+_probe("v0", open(os.path.join(out_dir, "v0.p12"), "rb").read(), "v0.p12")
 PY
 
 echo "==> [4/4] Installing into keychain (trying each variant)"
