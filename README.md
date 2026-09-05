@@ -22,7 +22,7 @@ Banana Hand 讓「一個快捷鍵」同時對兩個瀏覽器分頁做動作。�
 從最新的 [GitHub Preview Release](https://github.com/botio/banana-hand/releases) 下載符合
 作業系統的 desktop asset：
 - **Windows**：執行 NSIS `.exe` 安裝程式。
-- **macOS（僅 Apple Silicon）**：下載檔名含 `_aarch64.dmg` 的 Preview asset，並把 `Banana Hand.app` 拖到「應用程式」。app 使用「自簽 code-signing 憑證」（非 Apple Developer ID）簽章、未經 Apple notarization；首次開啟被 Gatekeeper 擋成「unidentified developer」時，先按「完成」，再到「系統設定 → 隱私權與安全性」按「仍要開啟／Open Anyway」。這只應用於你直接從本 repository GitHub Release 下載的 app；若警告改為「damaged」且沒有「Open Anyway」選項，清除一次隔離屬性即可：`xattr -dr com.apple.quarantine "/Applications/Banana Hand.app"`。
+- **macOS（僅 Apple Silicon）**：下載檔名含 `_aarch64.dmg` 的 Preview asset，把 `Banana Hand.app` 拖到「應用程式」。DMG 是 ad-hoc 簽章（無 Apple Developer ID、未 notarize），首次開啟會被 Gatekeeper 擋成「應用程式已損毀，無法開啟」；把 app 拖進 /Applications 後，在「終端機」清除一次隔離屬性即可正常開啟：`xattr -dr com.apple.quarantine "/Applications/Banana Hand.app"`（可能被要求允許 Terminal 變更）。ad-hoc／自簽簽章在近幾版 macOS 上無法產生「仍要開啟／Open Anyway」流程；若要移除這一次性的步驟需要 Apple Developer ID（$99/年），我們正在評估。
 - **Linux**：安裝 `.deb`（或使用 AppImage）。
 
 > App 靠「瀏覽器插件」看得到你的分頁。Preview Release 附帶 Chrome 的
@@ -113,7 +113,7 @@ App 內也可直接登錄 native host：在「讓 Browser 找到 Host」面板�
 | Linux X11 | Unix socket（`$XDG_RUNTIME_DIR/banana-hand/`，0700） | XTEST | 已驗證（本機） |
 | Linux Wayland | 同上 | **fail-closed**：`PortalPermissionRequired` | spec-only，見下 |
 | Windows | named pipe（`%LOCALAPPDATA%\Banana Hand\runtime\`，per-pid pipe） | `SendInput` event stream | 實機待驗 |
-| macOS Apple Silicon | Unix socket（`~/Library/Caches/Banana Hand/runtime`，0700） | CGEvent（檢查 Accessibility） | 實機待驗（自簽、未 notarize DMG + Gatekeeper「Open Anyway」） |
+| macOS Apple Silicon | Unix socket（`~/Library/Caches/Banana Hand/runtime`，0700） | CGEvent（檢查 Accessibility） | 實機待驗（ad-hoc DMG + xattr 清除隔離 + 授 Accessibility） |
 
 - **Linux Wayland**：portal 注入是 spec-only。`XDG_SESSION_TYPE=wayland` 時維持
   fail-closed 閘門（`PortalPermissionRequired`），不嘗試靜默注入。精確的
@@ -128,8 +128,8 @@ App 內也可直接登錄 native host：在「讓 Browser 找到 Host」面板�
   亦對 windows-sys 0.61 獨立通過型別檢查），但完整 App 建置仍需 mingw-w64
   工具鏈（本開發機無），故仍待實機 host 登錄與注入證據。
 - **macOS**：Unix-socket bridge 已指向 macOS 使用者專屬 cache 目錄（0700），
-  CGEvent 會先查 Accessibility；自簽、未 notarize 的 DMG 需使用者 Gatekeeper
-  「Open Anyway」+ 授 Accessibility，仍待實機驗證。
+  CGEvent 會先查 Accessibility；ad-hoc、未 notarize 的 DMG 首次開啟需先以
+  `xattr -dr com.apple.quarantine` 清除隔離屬性、再授 Accessibility，仍待實機驗證。
 
 因此 GitHub Release 目前一律標為 **Preview**：它提供版本化、可驗證的下載 artifact，
 但沒有任何平台／browser 配對可被標示為已正式支援；發布前仍必須完成 ADR 0003 規定的

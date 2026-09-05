@@ -6,9 +6,10 @@
 # consumes for `--target <triple>`. Outputs:
 #   - ubuntu-24.04  -> .deb + .AppImage
 #   - windows-latest -> NSIS installer (.exe)
-#   - macos-latest  -> unsigned, un-notarized DMG
+#   - macos-latest  -> ad-hoc-signed, un-notarized DMG
 #
-# macOS has no Apple signing/notarization here, so the DMG is unsigned by design.
+# Without an Apple Developer ID the DMG is ad-hoc signed; the user clears
+# Gatekeeper quarantine with one xattr command (see README + release notes).
 name: Build & Package
 
 on:
@@ -39,12 +40,10 @@ jobs:
           - os: macos-latest
             target: aarch64-apple-darwin
             bundles: "dmg"
-            # Sign with a real self-signed code-signing certificate (NOT ad-hoc
-            # "-"): macOS 26 classifies ad-hoc apps as "damaged" (no Open
-            # Anyway), while a real cert yields "unidentified developer" ->
-            # System Settings "Open Anyway". Identity name set by the
-            # sign-macos-selfsigned.sh step below.
-            macos_signing_identity: "Banana Hand Self-Signed Dev"
+            # No Apple Developer ID in CI, so the DMG is ad-hoc signed
+            # (macOS shows "damaged" until the user clears quarantine with
+            # one xattr command — see README + release notes).
+            macos_signing_identity: ""
 
     steps:
       - name: Checkout
@@ -76,19 +75,13 @@ jobs:
           node-version: 22
           cache: npm
 
-
-      - name: Create self-signed code-signing certificate
-        if: matrix.os == 'macos-latest'
-        run: bash scripts/sign-macos-selfsigned.sh
-
       - name: Install frontend dependencies
         run: npm ci
 
       # Runs `beforeBuildCommand` (native-host sidecar + frontend build), then
-      # bundles the targets valid for this OS. On macOS the app is signed with
-      # the self-signed code-signing certificate created above (a real cert,
-      # not ad-hoc), so Gatekeeper classifies it as "unidentified developer"
-      # and offers System Settings > Privacy & Security > "Open Anyway".
+      # bundles the targets valid for this OS. On macOS there is no Apple
+      # Developer ID, so the DMG is ad-hoc signed; the user clears Gatekeeper
+      # quarantine with one xattr command (see README + release notes).
       - name: Build app + native-host sidecar
         env:
           APPLE_SIGNING_IDENTITY: ${{ matrix.macos_signing_identity }}
@@ -175,7 +168,7 @@ jobs:
             -o -name '*.zip' -o -name '*.xpi' \
           \) -print0)
           test "${#assets[@]}" -gt 0
-          notes=$'Preview release only: build artifacts are attached, but this release does not claim a supported platform/browser pair. See docs/adr/0003-release-evidence-matrix.md for the required 24-cell real-device evidence matrix.\n\nmacOS (Apple Silicon): the DMG is signed with a self-signed code-signing certificate but not notarized (no Apple Developer ID). To open it the first time, launch the app; when Gatekeeper reports an unidentified developer, choose Done, then open System Settings > Privacy & Security and click Open Anyway. If it instead says the app is damaged and there is no Open Anyway option, clear the quarantine once: xattr -dr com.apple.quarantine "/Applications/Banana Hand.app".\n\nChromium: the extension uses a fixed ID (mooakjhlbkjfbmbmliklkmfmacnomlai) so the native host registers automatically; no manual extension-ID entry is needed.\n\nFirefox: use the temporary ZIP via about:debugging > Load Temporary Add-on; the extension ID bridge@banana-hand.dev is a placeholder because AMO signing is not configured.\n\nLinux: the AppImage bundles the native host at banana-hand-native-host, the .deb installs it at /usr/bin/banana-hand-native-host.\n\nWindows: the Inno Setup installer bundles the native host; the NSIS build is untested, and the app may show an "unknown publisher" SmartScreen warning because no code-signing certificate is configured.\n\nThis is a preview release; please report issues in the tracker.\n'
+          notes=$'Preview release only: build artifacts are attached, but this release does not claim a supported platform/browser pair. See docs/adr/0003-release-evidence-matrix.md for the required 24-cell real-device evidence matrix.\n\nmacOS (Apple Silicon): the DMG is ad-hoc signed (no Apple Developer ID), so Gatekeeper blocks first launch with "The application is damaged and cannot be opened." Drag the app into /Applications, then clear the quarantine once in Terminal and it opens normally: xattr -dr com.apple.quarantine "/Applications/Banana Hand.app". You may be asked to allow Terminal to make changes. We are evaluating an Apple Developer ID ($99/yr) to remove this one-time step; an ad-hoc or self-signed build cannot produce the Gatekeeper "Open Anyway" flow on recent macOS without one.\n\nChromium: the extension uses a fixed ID (mooakjhlbkjfbmbmliklkmfmacnomlai) so the native host registers automatically; no manual extension-ID entry is needed.\n\nFirefox: use the temporary ZIP via about:debugging > Load Temporary Add-on; the extension ID bridge@banana-hand.dev is a placeholder because AMO signing is not configured.\n\nLinux: the AppImage bundles the native host at banana-hand-native-host, the .deb installs it at /usr/bin/banana-hand-native-host.\n\nWindows: the Inno Setup installer bundles the native host; the NSIS build is untested, and the app may show an "unknown publisher" SmartScreen warning because no code-signing certificate is configured.\n\nThis is a preview release; please report issues in the tracker.\n'
           if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             gh release edit "${GITHUB_REF_NAME}" \
               --repo "${GITHUB_REPOSITORY}" \
