@@ -264,9 +264,13 @@ fn send_macos(chord: &ShortcutChord) -> Result<(), InputError> {
     unsafe extern "C" {
         fn AXIsProcessTrustedWithOptions(options: *const c_void) -> bool;
         static kCFBooleanTrue: *const c_void;
-        fn CFStringCreateWithCString(encoding: u32, string: *const u8) -> *const c_void;
+        fn CFStringCreateWithCString(
+            alloc: *const c_void,
+            string: *const u8,
+            encoding: u32,
+        ) -> *const c_void;
         fn CFDictionaryCreate(
-            info: *const c_void,
+            alloc: *const c_void,
             keys: *const *const c_void,
             values: *const *const c_void,
             count: isize,
@@ -277,8 +281,11 @@ fn send_macos(chord: &ShortcutChord) -> Result<(), InputError> {
     // System Settings) when the grant is missing, instead of failing with a
     // message the user has to translate into settings clicks.
     unsafe {
-        let key =
-            CFStringCreateWithCString(0x0800_0100, b"kAXTrustedCheckOptionPrompt\0".as_ptr());
+        let key = CFStringCreateWithCString(
+            std::ptr::null(),
+            b"kAXTrustedCheckOptionPrompt\0".as_ptr(),
+            0x0800_0100,
+        );
         let prompt: *const c_void = kCFBooleanTrue;
         let keys = [key];
         let values = [prompt];
@@ -363,8 +370,15 @@ fn frontmost_window_owner() -> Option<String> {
         fn CFArrayGetCount(array: *const c_void) -> isize;
         fn CFArrayGetValueAtIndex(array: *const c_void, index: isize) -> *const c_void;
         fn CFDictionaryGetValue(dict: *const c_void, key: *const c_void) -> *const c_void;
-        fn CFStringCreateWithCString(encoding: u32, string: *const u8) -> *const c_void;
+        fn CFStringCreateWithCString(
+            alloc: *const c_void,
+            string: *const u8,
+            encoding: u32,
+        ) -> *const c_void;
         fn CFNumberGetValue(number: *const c_void, number_type: u32, value: *mut i64) -> bool;
+        fn CFGetTypeID(value: *const c_void) -> u32;
+        fn CFNumberGetTypeID() -> u32;
+        fn CFStringGetTypeID() -> u32;
         fn CFRelease(value: *const c_void);
     }
 
@@ -378,13 +392,15 @@ fn frontmost_window_owner() -> Option<String> {
         if array.is_null() {
             return None;
         }
-        let layer_key = CFStringCreateWithCString(UTF8, b"kCGWindowLayer\0".as_ptr());
-        let owner_key = CFStringCreateWithCString(UTF8, b"kCGWindowOwnerName\0".as_ptr());
+        let layer_key =
+            CFStringCreateWithCString(std::ptr::null(), b"kCGWindowLayer\0".as_ptr(), UTF8);
+        let owner_key =
+            CFStringCreateWithCString(std::ptr::null(), b"kCGWindowOwnerName\0".as_ptr(), UTF8);
         let mut found = None;
         for index in 0..CFArrayGetCount(array) {
             let window = CFArrayGetValueAtIndex(array, index);
             let layer = CFDictionaryGetValue(window, layer_key);
-            if layer.is_null() {
+            if layer.is_null() || CFGetTypeID(layer) != CFNumberGetTypeID() {
                 continue;
             }
             let mut layer_value: i64 = -1;
@@ -392,7 +408,7 @@ fn frontmost_window_owner() -> Option<String> {
                 continue;
             }
             let owner = CFDictionaryGetValue(window, owner_key);
-            if !owner.is_null() {
+            if !owner.is_null() && CFGetTypeID(owner) == CFStringGetTypeID() {
                 found = cf_string_to_rust(owner);
                 break;
             }
@@ -408,20 +424,27 @@ fn frontmost_window_owner() -> Option<String> {
 fn cf_string_to_rust(value: *const std::ffi::c_void) -> Option<String> {
     #[link(name = "CoreFoundation", kind = "framework")]
     unsafe extern "C" {
-        fn CFStringGetLength(string: *const std::ffi::c_void) -> u32;
+        fn CFStringGetCStringLength(string: *const std::ffi::c_void, encoding: u32) -> isize;
         fn CFStringGetCString(
             string: *const std::ffi::c_void,
             buffer: *mut u8,
-            size: u32,
+            size: isize,
             encoding: u32,
         ) -> u32;
     }
 
     const UTF8: u32 = 0x0800_0100;
     unsafe {
-        let length = CFStringGetLength(value) as usize;
-        let mut buffer = vec![0u8; length + 1];
-        let written = CFStringGetCString(value, buffer.as_mut_ptr(), (length + 1) as u32, UTF8);
+        // Exact UTF-8 byte length first: sizing the buffer by UTF-16 units
+        // would be too small for multi-byte owners (e.g. CJK app names) and
+        // let CFStringGetCString overflow it.
+        let length = CFStringGetCStringLength(value, UTF8);
+        if length <= 0 {
+            return None;
+        }
+        let mut buffer = vec![0u8; length as usize + 1];
+        let written =
+            CFStringGetCString(value, buffer.as_mut_ptr(), (length + 1) as isize, UTF8);
         if written == 0 {
             return None;
         }

@@ -75,3 +75,23 @@ v0.1.3 之後使用者回報（macOS、真 Chrome）：
   manifest 含偵測欄位。macOS/Windows FFI 本開發機無工具鏈，
   由 CI（macos-latest / windows-latest）建置驗證。
 - Playwright 5/5（新 `host_self_check` 欄位為加性，stub 不受影響）。
+
+## v0.1.4 regression → v0.1.5 fix
+
+v0.1.4 上線後使用者回報「一按發送 App 就崩潰」（macOS）。根因：新加的
+CoreFoundation `extern "C"` 簽名是按記憶寫的、未經目標平台編譯：
+`CFStringCreateWithCString` 真实是 **3 參** `(allocator, string, encoding)`，
+被声明成 2 參 `(encoding, string)`——呼叫時 allocator 槽位讀到 encoding
+整數（假指標），CF 把它當 CFAllocator 物件解參數 → **第一次 call 就
+segfault**（a11y gate 與 window-owner 查詢兩條路徑都踩）。
+另兩個隱性錯誤一併修掉：`CFStringGetCString` 的 buffer 以前按
+**UTF-16 長度**分配（CJK 名稱會溢出）、`CFNumberGetValue`/`CFString`
+沒有 type guard（非预期類型未定義行為）。
+
+v0.1.5 修法：所有 CF 簽名對齊官方 header（`CFStringCreateWithCString`
+帶 null allocator、`CFStringGetCStringLength` 取**精確 UTF-8 位元組長**
+再分配 buffer、`CFGetTypeID` vs `CFNumberGetTypeID`/`CFStringGetTypeID`
+先驗類型再取值）。驗證方式：把 FFI 區塊原樣抽出成獨立 probe crate，
+對 `aarch64-apple-darwin` / `x86_64-pc-windows-gnu` 跑 `cargo check`
+（本機無 macOS/Windows 工具鏈時的可行替代；link-level 錯誤如
+`CFBooleanCreate` 不存在仍只能靠 CI——那個已在 v0.1.4 輪次被抓出並修掉）。
