@@ -366,7 +366,7 @@ fn frontmost_window_owner() -> Option<String> {
     #[link(name = "CoreFoundation", kind = "framework")]
     #[link(name = "CoreGraphics", kind = "framework")]
     unsafe extern "C" {
-        fn CGWindowListCopyWindowInfo(option: i32, relative_to_window: u32) -> *const c_void;
+        fn CGWindowListCopyWindowInfo(option: u32, relative_to_window: u32) -> *const c_void;
         fn CFArrayGetCount(array: *const c_void) -> isize;
         fn CFArrayGetValueAtIndex(array: *const c_void, index: isize) -> *const c_void;
         fn CFDictionaryGetValue(dict: *const c_void, key: *const c_void) -> *const c_void;
@@ -383,9 +383,9 @@ fn frontmost_window_owner() -> Option<String> {
     }
 
     const UTF8: u32 = 0x0800_0100;
-    const SINT64: u32 = 6; // kCFNumberSInt64Type
-    const ON_SCREEN: i32 = 1; // kCGWindowListOptionOnScreenOnly
-    const EXCLUDE_DESKTOP: i32 = 2; // kCGWindowListExcludeDesktopElements
+    const SINT64: u32 = 4; // kCFNumberSInt64Type (NOT 6: that is Float64)
+    const ON_SCREEN: u32 = 1; // kCGWindowListOptionOnScreenOnly
+    const EXCLUDE_DESKTOP: u32 = 2; // kCGWindowListExcludeDesktopElements
 
     unsafe {
         let array = CGWindowListCopyWindowInfo(ON_SCREEN | EXCLUDE_DESKTOP, 0);
@@ -424,27 +424,55 @@ fn frontmost_window_owner() -> Option<String> {
 fn cf_string_to_rust(value: *const std::ffi::c_void) -> Option<String> {
     #[link(name = "CoreFoundation", kind = "framework")]
     unsafe extern "C" {
-        fn CFStringGetCStringLength(string: *const std::ffi::c_void, encoding: u32) -> isize;
+        fn CFStringGetLength(string: *const std::ffi::c_void) -> isize;
         fn CFStringGetCString(
             string: *const std::ffi::c_void,
             buffer: *mut u8,
             size: isize,
             encoding: u32,
         ) -> u32;
+        fn CFStringGetBytes(
+            string: *const std::ffi::c_void,
+            range: CFRange,
+            encoding: u32,
+            loss_byte: u16,
+            external: u8,
+            buffer: *mut u8,
+            max_len: isize,
+            used: *mut isize,
+        ) -> isize;
+    }
+
+    // CFRange from CFBase.h: two CFIndex (i64) fields, passed by value.
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct CFRange {
+        location: isize,
+        length: isize,
     }
 
     const UTF8: u32 = 0x0800_0100;
     unsafe {
-        // Exact UTF-8 byte length first: sizing the buffer by UTF-16 units
-        // would be too small for multi-byte owners (e.g. CJK app names) and
-        // let CFStringGetCString overflow it.
-        let length = CFStringGetCStringLength(value, UTF8);
+        let length = CFStringGetLength(value);
         if length <= 0 {
             return None;
         }
-        let mut buffer = vec![0u8; length as usize + 1];
+        // Measure the exact UTF-8 byte length first (null buffer, zero max):
+        // sizing by UTF-16 units would under-allocate for multi-byte owners
+        // (e.g. CJK app names) and let CFStringGetCString overflow.
+        let mut used: isize = 0;
+        let range = CFRange {
+            location: 0,
+            length,
+        };
+        let consumed =
+            CFStringGetBytes(value, range, UTF8, 0, 0, std::ptr::null_mut(), 0, &mut used);
+        if consumed != length || used <= 0 {
+            return None;
+        }
+        let mut buffer = vec![0u8; used as usize + 1];
         let written =
-            CFStringGetCString(value, buffer.as_mut_ptr(), (length + 1) as isize, UTF8);
+            CFStringGetCString(value, buffer.as_mut_ptr(), (used + 1) as isize, UTF8);
         if written == 0 {
             return None;
         }

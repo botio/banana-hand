@@ -95,3 +95,13 @@ v0.1.5 修法：所有 CF 簽名對齊官方 header（`CFStringCreateWithCString
 對 `aarch64-apple-darwin` / `x86_64-pc-windows-gnu` 跑 `cargo check`
 （本機無 macOS/Windows 工具鏈時的可行替代；link-level 錯誤如
 `CFBooleanCreate` 不存在仍只能靠 CI——那個已在 v0.1.4 輪次被抓出並修掉）。
+
+同輪又抓到兩個只能靠對照來源發現的錯誤（CI linker 抓到
+`CFStringGetCStringLength`——該函數**根本不存在**，CF 沒有這種 API；
+改為用真正的 `CFStringGetBytes(string, CFRange, encoding, …)`，
+null buffer + max 0 先量出精確 UTF-8 位元組長再分配 buffer）。
+另：`kCFNumberSInt64Type` 是 **4**（不是 6，6 是 Float64）——若照 6
+呼叫，`CFNumberGetValue` 把 float64 位元組模式當 i64 讀回，layer-0
+窗口永遠「不匹配」，前景驗證在 macOS 上必然 fail-closed。所有 CF 符號
+已逐一對照 `core-foundation-sys`（本機 cargo registry 內的官方綁定
+轉寫）確認存在且簽名一致。
