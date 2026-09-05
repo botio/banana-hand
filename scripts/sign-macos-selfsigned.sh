@@ -106,9 +106,10 @@ def _first_oid(algid_field):
         pass
     return None
 
-def patch_macdata(macdata_field, password, authSafe, force_hash=None, force_iter=None):
-    """Keep cryptography's macData structure (AlgId+salt+iteration) but recompute
-    the digest with the legacy PKCS#12 KDF. Returns new macData field bytes."""
+def patch_macdata(macdata_field, password, authSafe, force_hash=None, force_iter=None,
+                  pwenc="bmp", msg_mode="field"):
+    """Keep cryptography's macData structure but recompute the digest with the
+    legacy PKCS#12 KDF. Returns the new macData field bytes."""
     _, mbody, _ = parse(macdata_field, 0)
     off = 0
     off, inner_seq = field(mbody, off)
@@ -122,7 +123,14 @@ def patch_macdata(macdata_field, password, authSafe, force_hash=None, force_iter
     o2, algid = field(iseq, o2)
     o2, digest_f = field(iseq, o2)
     hash_name = force_hash or OID_HASH.get(_first_oid(algid), "sha256")
-    new_mac = mac_hash(pw_bmp(password), salt_content, iterations, authSafe, hash_name)
+    if pwenc == "bmp":
+        pw = pw_bmp(password)
+    elif pwenc == "bmp_nonull":
+        pw = password.encode("utf-16-be")
+    else:
+        pw = pw_utf8(password)
+    msg = authSafe if msg_mode == "field" else parse(authSafe, 0)[1]
+    new_mac = mac_hash(pw, salt_content, iterations, msg, hash_name)
     if force_hash:
         algid = der(0x30, der(0x06, HASH_OID[hash_name]) + der(0x05, b""))
     new_inner = der(0x30, algid + der(0x04, new_mac))
@@ -186,22 +194,24 @@ _, authSafe_content, _ = parse(authSafe_field, 0)
 # ---------- emit candidate PKCS12 files ----------
 # Patch cryptography's macData digest in place with the legacy PKCS#12 KDF,
 # keeping its structure (AlgId hash, salt, iteration) that macOS accepts.
-# (force_hash, force_iter): None = "use what the file says".
+# (pwenc, force_hash): 3 password encodings x 2 hashes, file's iteration, field msg
 variants = [
-    (None,   None),   # AlgId hash (SHA-256), file's iteration
-    ("sha1", None),   # force SHA-1 KDF
-    ("sha1", 2048),   # force SHA-1, common iteration
-    (None,   2048),   # SHA-256, common iteration
-    (None,   3),      # SHA-256, alt iteration
-    ("sha1", 3),      # SHA-1, alt iteration
+    ("bmp",        None),   # BMP + null (standard PKCS#12)
+    ("bmp_nonull", None),   # BMP without null terminator
+    ("utf8",       None),   # raw UTF-8
+    ("bmp",        "sha1"),
+    ("bmp_nonull", "sha1"),
+    ("utf8",       "sha1"),
 ]
-for i, (force_hash, force_iter) in enumerate(variants):
-    macData = patch_macdata(macData_orig, password, authSafe_field, force_hash, force_iter)
+for i, (pwenc, force_hash) in enumerate(variants):
+    macData = patch_macdata(macData_orig, password, authSafe_field,
+                            force_hash=force_hash, force_iter=None,
+                            pwenc=pwenc, msg_mode="field")
     out = der(0x30, ver_field + authSafe_field + macData)
     path = os.path.join(out_dir, f"v{i}.p12")
     with open(path, "wb") as f:
         f.write(out)
-    print(f"  v{i}: force_hash={str(force_hash):<6} force_iter={str(force_iter):<6} len={len(out)}")
+    print(f"  v{i}: pwenc={pwenc:<11} hash={str(force_hash):<6} len={len(out)}")
 print(f"==> wrote {len(variants)} patched PKCS12 variants")
 # Diagnostics: is cryptography's RAW output valid, and where does v0 diverge?
 import subprocess
