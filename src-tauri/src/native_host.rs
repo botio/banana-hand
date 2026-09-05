@@ -1,14 +1,19 @@
-//! Registration of the desktop-app native messaging host with a browser.
+//! Registration of the desktop-app native messaging host with browsers.
 //!
 //! A browser launches the native host through a per-browser native-messaging
 //! manifest that points at the host binary. On Linux/macOS the manifest is a
-//! JSON file in a per-browser directory; on Windows the manifest file lives in
-//! the user's data directory and an HKCU registry value points at it.
+//! JSON file in a per-browser directory; on Windows the Chrome family is
+//! pointed at a manifest file through HKCU registry values and Firefox reads
+//! the manifest from its standard directory.
+//!
+//! Each Chrome channel (stable, Beta, Canary) and Chromium look in their own
+//! native-messaging directory, so auto-registration writes one manifest into
+//! every known channel: the user's actual browser finds it regardless of
+//! which one they run, and the app never needs to ask which browser they
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use banana_hand_protocol::BrowserKind;
-use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
 use tauri::Manager;
@@ -23,16 +28,52 @@ const FIREFOX_EXTENSION_ID: &str = "bridge@banana-hand.dev";
 /// Fixed Chromium extension id derived from `extensions/chromium/manifest.json`'s key.
 const CHROMIUM_EXTENSION_ID: &str = "mooakjhlbkjfbmbmliklkmfmacnomlai";
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RegisterNativeHostRequest {
-    pub browser: BrowserKind,
-    /// Absolute path to the native host binary. When omitted, defaults to a
-    /// sibling of the running executable (the dev layout, where the app and the
-    /// host are both built into `target/<profile>/`).
-    #[serde(default)]
-    pub host_path: Option<PathBuf>,
+/// A browser channel the native host can be registered with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostBrowser {
+    /// Google Chrome stable channel.
+    Chrome,
+    /// Google Chrome Beta channel.
+    ChromeBeta,
+    /// Google Chrome Canary channel.
+    ChromeCanary,
+    /// Chromium (the non-Google build of Chrome).
+    Chromium,
+    /// Mozilla Firefox.
+    Firefox,
 }
+
+impl HostBrowser {
+    /// Lowercase wire name used in UI status text.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Chrome => "chrome",
+            Self::ChromeBeta => "chrome-beta",
+            Self::ChromeCanary => "chrome-canary",
+            Self::Chromium => "chromium",
+            Self::Firefox => "firefox",
+        }
+    }
+
+    /// The protocol-level browser kind the channel speaks.
+    fn wire_kind(self) -> BrowserKind {
+        match self {
+            Self::Firefox => BrowserKind::Firefox,
+            Self::Chrome | Self::ChromeBeta | Self::ChromeCanary | Self::Chromium => {
+                BrowserKind::Chrome
+            }
+        }
+    }
+}
+
+/// Every channel auto-registration writes a manifest into.
+const ALL_BROWSERS: [HostBrowser; 5] = [
+    HostBrowser::Chrome,
+    HostBrowser::ChromeBeta,
+    HostBrowser::ChromeCanary,
+    HostBrowser::Chromium,
+    HostBrowser::Firefox,
+];
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -48,10 +89,33 @@ pub struct RegisterNativeHostResult {
     pub host_exists: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoRegisterEntry {
+    /// Channel name (see [`HostBrowser::as_str`]).
+    pub browser: String,
+    /// Where the native-messaging manifest was written (or would have been,
+    /// if the write failed).
+    pub manifest_path: PathBuf,
+    /// Where the browser will look for the host.
+    pub registry_location: String,
+    /// The host binary path the manifest points at.
+    pub host_path: PathBuf,
+    /// Whether that host binary currently exists on disk.
+    pub host_exists: bool,
+    /// Write/registry failure, when the entry could not be completed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoRegisterResult {
+    pub entries: Vec<AutoRegisterEntry>,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum RegistrationError {
-    #[error("native host 路徑必須是絕對路徑：{0}")]
-    HostPathNotAbsolute(PathBuf),
     #[error("寫入 native-messaging manifest 失敗（{0}）：{1}")]
     WriteFailed(PathBuf, String),
     #[error("設定 Windows registry 失敗：{0}")]
@@ -87,65 +151,76 @@ pub fn build_manifest(browser: &BrowserKind, host_path: &Path) -> Value {
     }
 }
 
-/// The directory that holds native-messaging host manifests for a browser.
+/// The directory that holds native-messaging host manifests for a browser
+/// channel.
 ///
-/// - Linux (XDG): `$HOME/.config/google-chrome/NativeMessagingHosts` for
-///   Chrome; `$HOME/.mozilla/native-messaging-hosts` for Firefox.
-/// - macOS: `~/Library/Google/Chrome/NativeMessagingHosts` for Chrome,
-///   `~/Library/Application Support/Mozilla/NativeMessagingHosts` for Firefox.
-/// - Windows: `%LOCALAPPDATA%\Banana Hand\native-host-manifests` (the browser
-///   is pointed here through an HKCU registry value).
-pub fn manifest_dir(browser: &BrowserKind, home: &Path, localappdata: &Path) -> PathBuf {
+/// - macOS: `~/Library/Google/Chrome{, Beta, Canary}/NativeMessagingHosts`
+///   for the Chrome channels, `~/Library/Application Support/Chromium/…`
+///   for Chromium, `~/Library/Application Support/Mozilla/NativeMessagingHosts`
+///   for Firefox.
+/// - Linux: `~/.config/{google-chrome,google-chrome-beta,google-chrome-canary,chromium}/
+///   NativeMessagingHosts` and `~/.mozilla/native-messaging-hosts`.
+/// - Windows: the Chrome channels share `%LOCALAPPDATA%\Banana Hand\native-host-manifests`
+///   (pointed at by an HKCU registry value); Firefox reads
+///   `%LOCALAPPDATA%\Mozilla\Firefox\NativeMessagingHosts` directly.
+pub fn manifest_dir(browser: HostBrowser, home: &Path, localappdata: &Path) -> PathBuf {
     #[cfg(target_os = "windows")]
     {
-        let _ = (browser, home);
-        return localappdata
-            .join("Banana Hand")
-            .join("native-host-manifests");
+        let _ = home;
+        match browser {
+            HostBrowser::Firefox => localappdata.join("Mozilla/Firefox/NativeMessagingHosts"),
+            _ => localappdata.join("Banana Hand").join("native-host-manifests"),
+        }
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
     {
         let _ = localappdata;
-        match browser {
-            BrowserKind::Firefox => {
-                #[cfg(target_os = "macos")]
-                {
-                    home.join("Library/Application Support/Mozilla/NativeMessagingHosts")
-                }
-                #[cfg(not(target_os = "macos"))]
-                {
-                    home.join(".mozilla/native-messaging-hosts")
-                }
-            }
-            BrowserKind::Chrome => {
-                #[cfg(target_os = "macos")]
-                {
-                    home.join("Library/Google/Chrome/NativeMessagingHosts")
-                }
-                #[cfg(not(target_os = "macos"))]
-                {
-                    home.join(".config/google-chrome/NativeMessagingHosts")
-                }
-            }
-        }
+        let sub = match browser {
+            HostBrowser::Chrome => "Library/Google/Chrome/NativeMessagingHosts",
+            HostBrowser::ChromeBeta => "Library/Google/Chrome Beta/NativeMessagingHosts",
+            HostBrowser::ChromeCanary => "Library/Google/Chrome Canary/NativeMessagingHosts",
+            HostBrowser::Chromium => "Library/Application Support/Chromium/NativeMessagingHosts",
+            HostBrowser::Firefox => "Library/Application Support/Mozilla/NativeMessagingHosts",
+        };
+        home.join(sub)
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        let _ = localappdata;
+        let sub = match browser {
+            HostBrowser::Chrome => ".config/google-chrome/NativeMessagingHosts",
+            HostBrowser::ChromeBeta => ".config/google-chrome-beta/NativeMessagingHosts",
+            HostBrowser::ChromeCanary => ".config/google-chrome-canary/NativeMessagingHosts",
+            HostBrowser::Chromium => ".config/chromium/NativeMessagingHosts",
+            HostBrowser::Firefox => ".mozilla/native-messaging-hosts",
+        };
+        home.join(sub)
     }
 }
 
-/// The full on-disk path of the native-messaging manifest for a browser.
-pub fn manifest_file_path(browser: &BrowserKind, home: &Path, localappdata: &Path) -> PathBuf {
+/// The full on-disk path of the native-messaging manifest for a channel.
+pub fn manifest_file_path(browser: HostBrowser, home: &Path, localappdata: &Path) -> PathBuf {
     manifest_dir(browser, home, localappdata).join(manifest_file_name())
 }
 
 /// A human-readable description of where the browser looks for the host.
-fn describe_location(browser: &BrowserKind, home: &Path, localappdata: &Path) -> String {
+fn describe_location(browser: HostBrowser, home: &Path, localappdata: &Path) -> String {
     #[cfg(target_os = "windows")]
     {
         let _ = (home, localappdata);
-        let subkey = match browser {
-            BrowserKind::Firefox => r"Software\Mozilla\NativeMessagingHosts",
-            BrowserKind::Chrome => r"Software\Google\Chrome\NativeMessagingHosts",
-        };
-        format!("HKCU\\{subkey}\\{HOST_NAME}（值指向 manifest 檔）")
+        match browser {
+            HostBrowser::Firefox => {
+                format!(
+                    "{}（檔案目錄）",
+                    manifest_dir(browser, home, localappdata).display()
+                )
+            }
+            _ => format!(
+                "HKCU\\{}\\{}（值指向 manifest 檔）",
+                windows_registry_subkey(browser),
+                HOST_NAME
+            ),
+        }
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -155,17 +230,20 @@ fn describe_location(browser: &BrowserKind, home: &Path, localappdata: &Path) ->
     }
 }
 
-/// Resolve the native host binary path: the explicit request value, or a
-/// sibling of the running executable.
-fn resolve_host_path(request: &RegisterNativeHostRequest) -> Result<PathBuf, RegistrationError> {
-    match &request.host_path {
-        Some(path) if path.is_absolute() => Ok(path.clone()),
-        Some(path) => Err(RegistrationError::HostPathNotAbsolute(path.clone())),
-        None => Ok(default_host_path()),
+/// The HKCU subkey a Chrome channel reads on Windows.
+#[cfg(target_os = "windows")]
+fn windows_registry_subkey(browser: HostBrowser) -> &'static str {
+    match browser {
+        HostBrowser::Chrome | HostBrowser::Chromium => "Software\\Google\\Chrome\\NativeMessagingHosts",
+        HostBrowser::ChromeBeta => "Software\\Google\\ChromeBeta\\NativeMessagingHosts",
+        HostBrowser::ChromeCanary => "Software\\Google\\ChromeCanary\\NativeMessagingHosts",
+        HostBrowser::Firefox => unreachable!("Firefox uses a file directory on Windows"),
     }
 }
 
-fn default_host_path() -> PathBuf {
+/// Resolve the native host binary path: an explicit value, or a sibling of
+/// the running executable (the sidecar layout).
+pub fn default_host_path() -> PathBuf {
     let exe = std::env::current_exe()
         .map(|path| path)
         .unwrap_or_else(|_| PathBuf::from("target/debug"));
@@ -178,26 +256,26 @@ fn default_host_path() -> PathBuf {
     parent.join(name)
 }
 
-
-/// Write the manifest to disk and (on Windows) point the registry at it.
+/// Write the manifest for one channel and (on Windows) point the registry at
+/// it.
 ///
 /// `home` and `localappdata` are explicit so the pure write flow is unit
 /// testable against a temp directory.
 pub fn register_in(
+    browser: HostBrowser,
     home: &Path,
     localappdata: &Path,
-    request: &RegisterNativeHostRequest,
+    host_path: &Path,
 ) -> Result<RegisterNativeHostResult, RegistrationError> {
-    let host_path = resolve_host_path(request)?;
     let host_exists = host_path.exists();
-    let manifest_path = manifest_file_path(&request.browser, home, localappdata);
+    let manifest_path = manifest_file_path(browser, home, localappdata);
 
     if let Some(parent) = manifest_path.parent() {
         fs::create_dir_all(parent).map_err(|error| {
             RegistrationError::WriteFailed(manifest_path.clone(), error.to_string())
         })?;
     }
-    let manifest = build_manifest(&request.browser, &host_path);
+    let manifest = build_manifest(&browser.wire_kind(), host_path);
     let encoded = serde_json::to_string_pretty(&manifest).map_err(|error| {
         RegistrationError::WriteFailed(manifest_path.clone(), error.to_string())
     })?;
@@ -206,33 +284,67 @@ pub fn register_in(
     })?;
 
     #[cfg(target_os = "windows")]
-    set_windows_registry(&request.browser, &manifest_path)?;
+    set_windows_registry(browser, &manifest_path)?;
 
     Ok(RegisterNativeHostResult {
         manifest_path,
-        registry_location: describe_location(&request.browser, home, localappdata),
-        host_path,
+        registry_location: describe_location(browser, home, localappdata),
+        host_path: host_path.to_path_buf(),
         host_exists,
     })
 }
 
-/// Tauri command entry point: resolves the home / LOCALAPPDATA and delegates to
-/// [`register_in`].
-#[tauri::command]
-pub fn register_native_host(
-    app: tauri::AppHandle,
-    request: RegisterNativeHostRequest,
-) -> Result<RegisterNativeHostResult, String> {
-    let home = app.path().home_dir().map_err(|error| error.to_string())?;
-    let localappdata_string = std::env::var("LOCALAPPDATA").unwrap_or_default();
-    let localappdata = Path::new(&localappdata_string);
-    register_in(&home, localappdata, &request).map_err(|error| error.to_string())
+/// Write the native-messaging manifest into every known browser channel.
+///
+/// Per-channel failures are recorded on the entry instead of aborting the
+/// batch, so one unreadable directory never blinds the rest.
+pub fn auto_register(
+    home: &Path,
+    localappdata: &Path,
+    host_path: Option<&Path>,
+) -> AutoRegisterResult {
+    let host = host_path.map(Path::to_path_buf).unwrap_or_else(default_host_path);
+    let host_exists = host.exists();
+    let mut result = AutoRegisterResult::default();
+    for browser in ALL_BROWSERS {
+        match register_in(browser, home, localappdata, &host) {
+            Ok(entry) => result.entries.push(AutoRegisterEntry {
+                browser: browser.as_str().to_owned(),
+                manifest_path: entry.manifest_path,
+                registry_location: entry.registry_location,
+                host_path: entry.host_path,
+                host_exists,
+                error: None,
+            }),
+            Err(error) => result.entries.push(AutoRegisterEntry {
+                browser: browser.as_str().to_owned(),
+                manifest_path: manifest_file_path(browser, home, localappdata),
+                registry_location: describe_location(browser, home, localappdata),
+                host_path: host.clone(),
+                host_exists,
+                error: Some(error.to_string()),
+            }),
+        }
+    }
+    result
 }
 
-/// Write the HKCU registry value that points the browser at the manifest file.
+/// Auto-registers the native host with every known browser channel using the
+/// default (sidecar) host path. Called once on app startup.
+pub fn auto_register_native_hosts(app: &tauri::AppHandle) -> Result<AutoRegisterResult, String> {
+    let home = app
+        .path()
+        .home_dir()
+        .map_err(|error| error.to_string())?;
+    let localappdata_string = std::env::var("LOCALAPPDATA").unwrap_or_default();
+    Ok(auto_register(&home, Path::new(&localappdata_string), None))
+}
+
+/// Write the HKCU registry value that points a Chrome channel at the manifest
+/// file.
 #[cfg(target_os = "windows")]
 fn set_windows_registry(
-    browser: &BrowserKind,
+    browser: HostBrowser,
     manifest_path: &Path,
 ) -> Result<(), RegistrationError> {
     use windows_sys::Win32::System::Registry::{
@@ -240,10 +352,7 @@ fn set_windows_registry(
         RegSetValueExW,
     };
 
-    let subkey = match browser {
-        BrowserKind::Firefox => "Software\\Mozilla\\NativeMessagingHosts",
-        BrowserKind::Chrome => "Software\\Google\\Chrome\\NativeMessagingHosts",
-    };
+    let subkey = windows_registry_subkey(browser);
     let subkey_wide = wide(subkey);
     let value_wide = wide(HOST_NAME);
     let data_wide = wide(&manifest_path.to_string_lossy());
@@ -297,7 +406,6 @@ fn wide(value: &str) -> Vec<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use banana_hand_protocol::BrowserKind;
 
     #[test]
     fn firefox_manifest_uses_fixed_id_and_allowed_extensions() {
@@ -323,23 +431,33 @@ mod tests {
     }
 
     #[test]
-    fn linux_manifest_dirs_follow_xdg_layout() {
+    fn manifest_dirs_cover_every_chrome_channel() {
         let home = Path::new("/home/user");
         let localappdata = Path::new("");
-        assert_eq!(
-            manifest_dir(&BrowserKind::Firefox, home, localappdata),
-            Path::new("/home/user/.mozilla/native-messaging-hosts")
-        );
-        assert_eq!(
-            manifest_dir(&BrowserKind::Chrome, home, localappdata),
-            Path::new("/home/user/.config/google-chrome/NativeMessagingHosts")
-        );
-        assert_eq!(
-            manifest_file_path(&BrowserKind::Firefox, home, localappdata),
-            Path::new(
-                "/home/user/.mozilla/native-messaging-hosts/dev.bananahand.dispatch_host.json"
-            )
-        );
+        // The exact directories differ per OS; assert the channel layout
+        // (distinct dir per channel, all under the right browser root).
+        let chrome = manifest_dir(HostBrowser::Chrome, home, localappdata);
+        let beta = manifest_dir(HostBrowser::ChromeBeta, home, localappdata);
+        let canary = manifest_dir(HostBrowser::ChromeCanary, home, localappdata);
+        let chromium = manifest_dir(HostBrowser::Chromium, home, localappdata);
+        let firefox = manifest_dir(HostBrowser::Firefox, home, localappdata);
+        assert_ne!(chrome, beta);
+        assert_ne!(chrome, canary);
+        assert_ne!(chrome, chromium);
+        for dir in [&chrome, &beta, &canary, &chromium] {
+            assert!(
+                dir.to_string_lossy().contains("NativeMessagingHosts"),
+                "chrome-family dir must end in NativeMessagingHosts: {dir:?}"
+            );
+        }
+        assert_ne!(&firefox, &chrome);
+        for browser in ALL_BROWSERS {
+            let file = manifest_file_path(browser, home, localappdata);
+            assert_eq!(
+                file.file_name().unwrap().to_string_lossy(),
+                manifest_file_name()
+            );
+        }
     }
 
     #[test]
@@ -356,11 +474,8 @@ mod tests {
         // A stand-in native host binary inside the temp dir so host_exists is true.
         let host = temp.join("banana-hand-native-host");
         fs::write(&host, b"fake native host").expect("write fake host");
-        let request = RegisterNativeHostRequest {
-            browser: BrowserKind::Firefox,
-            host_path: Some(host.clone()),
-        };
-        let result = register_in(&temp, Path::new(""), &request).expect("register firefox");
+        let result =
+            register_in(HostBrowser::Firefox, &temp, Path::new(""), &host).expect("register firefox");
         assert!(result.manifest_path.exists());
         assert!(result.host_exists);
         assert_eq!(result.host_path, host);
@@ -374,7 +489,7 @@ mod tests {
     }
 
     #[test]
-    fn chromium_registration_writes_manifest_with_fixed_extension_id() {
+    fn auto_register_writes_one_manifest_per_channel() {
         let temp = std::env::temp_dir().join(format!(
             "banana-hand-test-{}-{}",
             std::process::id(),
@@ -386,17 +501,44 @@ mod tests {
         fs::create_dir_all(&temp).expect("create temp home");
         let host = temp.join("banana-hand-native-host");
         fs::write(&host, b"fake native host").expect("write fake host");
-        let request = RegisterNativeHostRequest {
-            browser: BrowserKind::Chrome,
-            host_path: Some(host),
-        };
-        let result = register_in(&temp, Path::new(""), &request).expect("register chromium");
-        let written = fs::read_to_string(&result.manifest_path).expect("read written manifest");
-        let parsed: Value = serde_json::from_str(&written).expect("valid json");
-        assert_eq!(
-            parsed["allowed_origins"][0],
-            format!("chrome-extension://{CHROMIUM_EXTENSION_ID}/")
+
+        let result = auto_register(&temp, Path::new(""), Some(&host));
+        assert_eq!(result.entries.len(), ALL_BROWSERS.len());
+        assert!(
+            result.entries.iter().all(|entry| entry.error.is_none()),
+            "all entries should succeed in a writable temp home: {:?}",
+            result.entries.iter().map(|entry| &entry.error).collect::<Vec<_>>()
         );
+        // Every entry wrote a distinct manifest with the right allowlist.
+        let mut seen = std::collections::HashSet::new();
+        for entry in &result.entries {
+            assert!(seen.insert(entry.manifest_path.clone()));
+            let parsed: Value =
+                serde_json::from_str(&fs::read_to_string(&entry.manifest_path).unwrap()).unwrap();
+            assert_eq!(parsed["name"], HOST_NAME);
+            match HostBrowser::as_str_inverse(&entry.browser) {
+                Some(HostBrowser::Firefox) => {
+                    assert_eq!(parsed["allowed_extensions"][0], FIREFOX_EXTENSION_ID);
+                    assert!(parsed.get("allowed_origins").is_none());
+                }
+                _ => {
+                    assert_eq!(
+                        parsed["allowed_origins"][0],
+                        format!("chrome-extension://{CHROMIUM_EXTENSION_ID}/")
+                    );
+                    assert!(parsed.get("allowed_extensions").is_none());
+                }
+            }
+        }
         let _ = fs::remove_dir_all(&temp);
+    }
+
+    impl HostBrowser {
+        fn as_str_inverse(name: &str) -> Option<HostBrowser> {
+            ALL_BROWSERS
+                .iter()
+                .copied()
+                .find(|browser| browser.as_str() == name)
+        }
     }
 }

@@ -33,6 +33,7 @@ Standing preferences:
 - [決定設定持久化與分頁重選規則](issues/07-persistent-preferences-and-session-targets.md): 僅持久化快捷鍵庫；目標與發送狀態皆為 session-only，冷卻隨 App 結束失效，設定 migration 可備份復原。
 - [決定跨平台驗證與發布證據](issues/10-platform-validation-and-release-proof.md): 每個 release 需有 12 個平台／工作階段／browser 配對的實機證據（Chrome–Chrome、Firefox–Firefox、Chrome–Firefox）；Brave 不屬首版支援範圍。
 - [修復 extension 一次連線失聯與快捷鍵逐字輸入](issues/12-extension-auto-reconnect-and-chord-recorder.md): extension 斷線後指數退避自動重試（啟動順序不再重要）、App 依 connected_hosts / last_bridge_rejection 分級診斷並清掉 stale session；快捷鍵組合改為按鍵錄製器（裸 Esc 取消、裸 F 鍵可單獨、其餘須帶修飾鍵），存儲格式不變。
+- [修復 Chrome 通道連線、快捷鍵刪除與自動登錄](issues/13-chrome-channel-registration-delete-and-autodetect.md): App 啟動時自動把固定-ID native host manifest 寫入 Chrome（stable／Beta／Canary）、Chromium、Firefox 各通道目錄（Windows Firefox 改寫 Mozilla 標準目錄）；extension 上報 browser 的 `lastError` 斷線原因供 App 分級診斷並加 port orphan guard；快捷鍵庫每項增加「×」刪除。
 
 ## Not yet specified
 

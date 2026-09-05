@@ -155,6 +155,26 @@ test("a draft typed during a pending save is not reset when the save settles", a
               cooldown_remaining_seconds: 0,
               connected_hosts: 0,
               last_bridge_rejection: null,
+              last_host_disconnect_reason: null,
+            };
+          case "native_host_registration":
+            return {
+              entries: [
+                {
+                  browser: "chrome",
+                  manifestPath: "/tmp/nm/chrome.json",
+                  registryLocation: "/tmp/nm",
+                  hostPath: "/tmp/host",
+                  hostExists: true,
+                },
+                {
+                  browser: "firefox",
+                  manifestPath: "/tmp/nm/firefox.json",
+                  registryLocation: "/tmp/nm",
+                  hostPath: "/tmp/host",
+                  hostExists: true,
+                },
+              ],
             };
           default:
             throw new Error(`unexpected command ${command}`);
@@ -197,4 +217,75 @@ test("a draft typed during a pending save is not reset when the save settles", a
   await expect(page.locator("#shortcut-list")).toContainText("慢存確認");
   await expect(name).toHaveValue("下一筆草稿");
   await expect(chordValue).toHaveText("Ctrl+F10");
+});
+
+test("each shortcut card has a delete button that removes it", async ({ page }) => {
+  await page.addInitScript(() => {
+    const state = { settings: { schemaVersion: 1, shortcuts: [] } };
+    window.__TAURI_INTERNALS__ = {
+      metadata: {
+        currentWindow: { label: "main" },
+        currentWebview: { label: "main" },
+      },
+      async invoke(command, payload) {
+        switch (command) {
+          case "plugin:store|load":
+            return "test-store-rid";
+          case "plugin:store|get":
+            return [state.settings, true];
+          case "plugin:store|set":
+            state.settings = payload.value;
+            return null;
+          case "plugin:store|save":
+            return null;
+          case "runtime_snapshot":
+            return {
+              tabs: [],
+              cooldown_remaining_seconds: 0,
+              connected_hosts: 0,
+              last_bridge_rejection: null,
+              last_host_disconnect_reason: null,
+            };
+          case "native_host_registration":
+            return {
+              entries: [
+                {
+                  browser: "chrome",
+                  manifestPath: "/tmp/nm/chrome.json",
+                  registryLocation: "/tmp/nm",
+                  hostPath: "/tmp/host",
+                  hostExists: true,
+                },
+                {
+                  browser: "firefox",
+                  manifestPath: "/tmp/nm/firefox.json",
+                  registryLocation: "/tmp/nm",
+                  hostPath: "/tmp/host",
+                  hostExists: true,
+                },
+              ],
+            };
+          default:
+            throw new Error(`unexpected command ${command}`);
+        }
+      },
+    };
+  });
+  await page.goto(url);
+
+  // The auto-registration line reports the channels the App registered.
+  await expect(page.locator("#registration-status")).toContainText("native host 已自動登錄");
+
+  const name = page.getByRole("textbox", { name: "快捷鍵名稱" });
+  await name.fill("待刪快捷鍵");
+  await recordChord(page, "Ctrl+Shift+J");
+  await page.getByRole("button", { name: "新增快捷鍵" }).click();
+  await expect(page.locator("#shortcut-list")).toContainText("待刪快捷鍵");
+
+  // The card's × button deletes just that shortcut.
+  await page
+    .getByRole("button", { name: "刪除快捷鍵：待刪快捷鍵" })
+    .click();
+  await expect(page.locator("#shortcut-list")).toContainText("尚無快捷鍵");
+  await expect(page.locator("#connection-status")).toContainText("已刪除「待刪快捷鍵」");
 });

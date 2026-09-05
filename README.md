@@ -45,11 +45,15 @@ Banana Hand 讓「一個快捷鍵」同時對兩個瀏覽器分頁做動作。�
 
 > 若 release note 明示存在「AMO-signed」的 `.xpi`，可改到 `about:addons` → 右上齒輪 →「安裝附加元件…」永久安裝。未簽署 `.xpi` 不能在標準 Firefox 安裝。
 
-### 第 3 步：讓 Browser 找到 Host
-1. 開啟 Banana Hand，到「讓 Browser 找到 Host」面板。
-2. 選你的瀏覽器（`Chrome / Chromium` 或 `Firefox`）。
-3. 按「登錄 native host」。兩個 extension 都使用固定 ID，不需要貼任何值。
-4. extension 連線後，App 會自動顯示可選 Browser Tab。若已載入舊版 Chrome extension，請到 `chrome://extensions` 對 Banana Hand 按「重新載入」一次。
+### 第 3 步：讓 Browser 找到 Host（自動）
+
+App 每次啟動時會自動把 native host 登錄到所有已知的 browser 目錄——
+Chrome（stable／Beta／Canary）、Chromium、Firefox——兩個 extension 都使用固定 ID，
+不需要手動登錄、選 browser 或貼任何值。App 上方的狀態列會顯示本次自動登錄的結果
+（各目錄路徑、host binary 是否存在）。
+
+extension 連線後，App 會自動顯示可選 Browser Tab；若已載入舊版 extension，請到
+`chrome://extensions`（或 `about:debugging`）對 Banana Hand 按「重新載入」一次。
 
 extension 斷線後會自動重試（3 秒起、最多 30 秒間隔），**App 與 browser 的啟動順序不再重要**：
 先開 App、後開 browser，或先開 browser、後開 App，extension 都會等到 native host 可用再完成
@@ -59,14 +63,21 @@ extension 斷線後會自動重試（3 秒起、最多 30 秒間隔），**App �
 1. 在「快捷鍵庫」按「新增快捷鍵」，填名稱；組合欄位**點一下再直接按鍵**（例如按住 `Ctrl+Shift` 再按 `K`），
    不要逐字輸入。裸按 `Esc` 取消錄製；裸 F 鍵（如 `F9`）可以單獨作為快捷鍵，其他主要按鍵必須搭配
    至少一個修飾鍵。
-2. 在「發送」面板的「目標 01」「目標 02」各選一個已連線的分頁（兩者必須不同）。
-3. 選一個快捷鍵，按「發送快捷鍵」。
-4. App 會依序對兩個分頁盡力送出，並在下方顯示結果。
+2. 快捷鍵庫中每一項右側有「×」，點一下即可刪除該快捷鍵。
+3. 在「發送」面板的「目標 01」「目標 02」各選一個已連線的分頁（兩者必須不同）。
+4. 選一個快捷鍵，按「發送快捷鍵」。
+5. App 會依序對兩個分頁盡力送出，並在下方顯示結果。
 
 ### 常見問題
 - **看不到我的分頁**：看 App 上方的連線狀態——它會指出卡在哪一級：
-  - 「尚無 native host 連線」＝ extension 還沒握上：確認 App 正在執行、extension 已載入（載入後若 App 已開著，
-    幾秒內會自動重試成功）、且第 3 步已登錄。
+  - 「尚無 native host 連線」＝ extension 還沒握上：確認 App 正在執行、extension 已載入
+    （載入後若 App 已開著，幾秒內會自動重試成功）。App 每次啟動已自動寫入所有
+    Chrome 系與 Firefox 的 native messaging 目錄；若你用的是 Chrome Beta／Canary／Chromium，
+    manifest 也已寫入它們各自的目錄。若 browser 是其他 Chromium 系（例如 Brave），
+    其目錄不同，需要手動登錄（見「Browser extension 與 native host」）。
+  - 狀態列若出現「最近一次 extension 回報」，那是 browser 對連不上 host 的原始診斷
+    （例如 `Native messaging host not found`＝manifest 不在該 browser 的目錄、
+    `Native host has exited`＝host binary 存在但啟動即退出）。
   - 「native host 已連線，但尚未收到 Browser Tab 快照」＝ extension 的 service worker 可能睡了：
     到 `chrome://extensions` 對 Banana Hand 按「重新載入」。
   - 「協定版本不符」＝ App 與 extension 版本不同步：下載同版本 release 的 extension 重新載入。
@@ -96,6 +107,17 @@ cargo build -p banana-hand-native-host
 - Firefox source：`extensions/firefox/`。其固定 Gecko Add-on ID 是 `bridge@banana-hand.dev`；正式版須由 AMO 簽署。
 - desktop installer 應安裝 host binary 與各 browser 的 native messaging manifest，但不得旁載 extension。
 
+App 啟動時的自動登錄（`native_host::auto_register`）會把同一份 manifest 寫入所有已知通道：
+macOS 為 `~/Library/Google/Chrome{, Beta, Canary}/NativeMessagingHosts/`、
+`~/Library/Application Support/Chromium/NativeMessagingHosts/`、
+`~/Library/Application Support/Mozilla/NativeMessagingHosts/`；Linux 為
+`~/.config/{google-chrome,google-chrome-beta,google-chrome-canary,chromium}/NativeMessagingHosts/`、
+`~/.mozilla/native-messaging-hosts/`；Windows 的 Chrome 系共用
+`%LOCALAPPDATA%\Banana Hand\native-host-manifests\` 並登記 HKCU registry 值，
+Firefox 直接寫入 `%LOCALAPPDATA%\Mozilla\Firefox\NativeMessagingHosts\`。
+manifest 中的 host 路徑預設為 App 執行檔的同層 sibling（sidecar），因此每次啟動都會
+自動刷新——App 搬家之後也不需要手動重登錄。
+
 產生 manifest 時必須提供實際、已發布的 extension identity 與絕對 host 路徑：
 
 ```sh
@@ -106,9 +128,8 @@ npm run native-host-manifest -- \
   --out=/absolute/path/to/manifest.json
 ```
 
-Chrome／Firefox 的 installer 登錄位置必須依官方文件寫入。Brave 不屬於首版支援範圍（其 native host lookup 無官方路徑保證）；此專案不假定 Chrome 的登錄位置對其他 Chromium 系 browser 有效。
-
-App 內也可直接登錄 native host：在「讓 Browser 找到 Host」面板選 browser（Chromium 系需填 extension id，Firefox 使用固定 id），App 會寫入該 browser 的 native-messaging manifest——Linux 為 `~/.config/google-chrome/NativeMessagingHosts/` 或 `~/.mozilla/native-messaging-hosts/`，macOS 為 `~/Library/.../NativeMessagingHosts/`，Windows 則把 manifest 放在 `%LOCALAPPDATA%\Banana Hand\native-host-manifests\` 並登記 HKCU registry 值指向它。manifest 中的 host 路徑預設為 App 執行檔的同層 sibling，可另行指定。
+Chrome／Firefox 的 installer 登錄位置必須依官方文件寫入。Brave 等未列出的 Chromium 系 browser
+不屬於自動登錄覆蓋範圍（其 native host lookup 無官方路徑保證），需要手動產生 manifest。
 
 ## 發送契約
 

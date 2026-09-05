@@ -10,6 +10,10 @@ let browserInstanceId;
 let generation = 0;
 let reconnectDelayMs = RECONNECT_BASE_MS;
 let reconnectTimer;
+// The browser's own diagnosis of the most recent failed connect (e.g.
+// "Native messaging host not found"), reported in the next hello so the App
+// can show it when no host is connected.
+let lastDisconnectReason;
 
 async function ensureBrowserInstanceId() {
   const saved = await chrome.storage.local.get(INSTANCE_KEY);
@@ -74,23 +78,34 @@ function connectNativeHost() {
     clearTimeout(reconnectTimer);
     reconnectTimer = undefined;
   }
+  // Chrome blocks a new connect while a previous port to the same host is
+  // still open; closing it first keeps every retry from deadlocking.
+  if (nativePort) {
+    nativePort.disconnect();
+    nativePort = undefined;
+  }
   const port = chrome.runtime.connectNative(NATIVE_HOST_NAME);
   nativePort = port;
   port.onMessage.addListener((message) => {
     // Any message from the host proves the bridge is alive; reset backoff so a
     // later drop retries quickly.
     reconnectDelayMs = RECONNECT_BASE_MS;
-    if (message.type === "prepare") void prepareTarget(message);
     if (message.type === "error") {
       // The handshake was rejected (stale capability token after an app
       // restart, or a protocol mismatch). Tearing the port down makes the
       // retry loop relaunch the host, which re-reads the fresh bridge.json.
       port.disconnect();
+      return;
     }
+    lastDisconnectReason = undefined;
+    if (message.type === "prepare") void prepareTarget(message);
   });
   port.onDisconnect.addListener(() => {
     if (nativePort !== port) return;
     nativePort = undefined;
+    if (chrome.runtime.lastError) {
+      lastDisconnectReason = String(chrome.runtime.lastError.message ?? chrome.runtime.lastError);
+    }
     scheduleReconnect();
   });
   port.postMessage({
@@ -100,6 +115,7 @@ function connectNativeHost() {
     browser: BROWSER_KIND,
     browser_instance_id: browserInstanceId,
     session_nonce: sessionNonce,
+    last_disconnect_reason: lastDisconnectReason,
   });
   void sendSnapshot();
 }
@@ -129,7 +145,7 @@ chrome.tabs.onDetached.addListener(scheduleSnapshot);
 chrome.windows.onRemoved.addListener(scheduleSnapshot);
 chrome.runtime.onStartup.addListener(() => {
   sessionNonce = crypto.randomUUID();
-  reconnectDelayMs = RECONNECT_BASE_MS;
+  lastDisconnectReason = undefined;
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = undefined;

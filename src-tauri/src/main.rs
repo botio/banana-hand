@@ -25,6 +25,8 @@ const PREPARE_TIMEOUT: Duration = Duration::from_secs(3);
 struct AppState {
     coordinator: Arc<Mutex<DispatchCoordinator>>,
     input_adapter: PlatformInputAdapter,
+    /// The native-host auto-registration outcome, computed once on startup.
+    native_host_registration: Mutex<native_host::AutoRegisterResult>,
 }
 
 #[derive(Default)]
@@ -36,6 +38,9 @@ pub(crate) struct DispatchCoordinator {
     /// The last rejected native-host handshake code (e.g. "protocol_mismatch");
     /// cleared when a hello succeeds.
     pub(crate) last_bridge_rejection: Option<String>,
+    /// The last disconnect reason the extension itself reported in its hello
+    /// (the browser's own words, e.g. "Native messaging host not found").
+    pub(crate) last_host_disconnect_reason: Option<String>,
 }
 
 impl DispatchCoordinator {
@@ -53,6 +58,7 @@ struct RuntimeSnapshot {
     cooldown_remaining_seconds: u64,
     connected_hosts: u32,
     last_bridge_rejection: Option<String>,
+    last_host_disconnect_reason: Option<String>,
 }
 
 #[tauri::command]
@@ -63,7 +69,14 @@ fn runtime_snapshot(state: State<'_, AppState>) -> RuntimeSnapshot {
         cooldown_remaining_seconds: coordinator.cooldown_remaining_seconds(),
         connected_hosts: coordinator.browser_ports.len() as u32,
         last_bridge_rejection: coordinator.last_bridge_rejection.clone(),
+        last_host_disconnect_reason: coordinator.last_host_disconnect_reason.clone(),
     }
+}
+
+/// The native-host auto-registration outcome computed on app startup.
+#[tauri::command]
+fn native_host_registration(state: State<'_, AppState>) -> native_host::AutoRegisterResult {
+    state.native_host_registration.lock().clone()
 }
 
 #[tauri::command]
@@ -246,16 +259,28 @@ fn main() {
         .manage(AppState {
             coordinator,
             input_adapter: PlatformInputAdapter,
+            native_host_registration: Mutex::new(native_host::AutoRegisterResult::default()),
         })
-        .setup(move |_| {
+        .setup(move |app| {
             bridge::start(bridge_coordinator.clone()).map_err(std::io::Error::other)?;
+            // Register the native host with every known browser channel before
+            // the first extension handshake can arrive; failures stay
+            // non-fatal and surface in the UI instead of blocking startup.
+            let registration = match native_host::auto_register_native_hosts(app.handle()) {
+                Ok(result) => result,
+                Err(error) => {
+                    eprintln!("banana-hand: native host auto-registration failed: {error}");
+                    native_host::AutoRegisterResult::default()
+                }
+            };
+            *app.state::<AppState>().native_host_registration.lock() = registration;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             runtime_snapshot,
             request_dispatch,
             backup_settings_before_migration,
-            native_host::register_native_host
+            native_host_registration,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Banana Hand desktop application");

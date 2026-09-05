@@ -1,8 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import type {
+  AutoRegisterResult,
   DispatchOutcome,
-  NativeHostRegistrationResult,
   RuntimeSnapshot,
   Settings,
   ShortcutRecord,
@@ -23,14 +23,14 @@ let snapshot: RuntimeSnapshot = {
   cooldown_remaining_seconds: 0,
   connected_hosts: 0,
   last_bridge_rejection: null,
+  last_host_disconnect_reason: null,
 };
 let selectedShortcutId: string | undefined;
 let selectedFirstTarget: string | undefined;
 let selectedSecondTarget: string | undefined;
 let repository: SettingsRepository | undefined;
 let statusMessage = "正在連線到桌面協調器…";
-let nativeHostBrowser: "chrome" | "firefox" = "chrome";
-let nativeHostResult = "";
+let registrationStatus = "";
 let dispatchResult = "";
 const MODIFIER_NAME_BY_INPUT: Record<string, string> = {
   ctrl: "Ctrl",
@@ -188,6 +188,7 @@ function mount(): void {
           <h1>一次發送，兩個目標。</h1>
         </div>
         <p id="connection-status" class="connection-status"></p>
+        <p id="registration-status" class="registration-status"></p>
       </header>
       <div class="workbench">
         <section class="panel shortcut-panel" aria-labelledby="shortcut-title">
@@ -229,30 +230,6 @@ function mount(): void {
           <p id="result" class="result" role="status"></p>
         </section>
       </div>
-      <section class="panel native-host-panel" aria-labelledby="native-host-title">
-        <div class="panel-heading">
-          <div>
-            <p class="eyebrow">NATIVE MESSAGING HOST</p>
-            <h2 id="native-host-title">讓 Browser 找到 Host</h2>
-          </div>
-        </div>
-        <p class="contract">
-          Browser 透過 native messaging 機制啟動 native host；native host 再經 OS-user IPC
-          連回桌面 App。選擇 browser 後登錄 native host，extension 連線後會自動回報可選分頁。
-          extension 斷線後會自動重試（3–30 秒間隔），App 與 browser 的啟動順序不再重要。
-        </p>
-        <div class="native-host-form">
-          <label>
-            Browser
-            <select id="nh-browser">
-              <option value="chrome">Chrome / Chromium</option>
-              <option value="firefox">Firefox</option>
-            </select>
-          </label>
-          <button id="nh-register" class="dispatch-button" type="button">登錄 native host</button>
-        </div>
-        <p id="nh-result" class="result" role="status"></p>
-      </section>
     </section>
   `;
 
@@ -267,10 +244,6 @@ function mount(): void {
     selectedSecondTarget = secondTarget.value || undefined;
     render();
   });
-  const nativeHostSelect = requireElement<HTMLSelectElement>("#nh-browser");
-  nativeHostSelect.addEventListener("change", () => {
-    nativeHostBrowser = nativeHostSelect.value as "chrome" | "firefox";
-  });
   chordRecorder = requireElement<HTMLButtonElement>("#chord-recorder");
   chordValue = requireElement<HTMLSpanElement>("#chord-recorder-value");
   chordHint = requireElement<HTMLSpanElement>("#chord-recorder-hint");
@@ -281,7 +254,6 @@ function mount(): void {
   });
   chordRecorder.addEventListener("blur", () => endChordCapture());
   requireElement<HTMLFormElement>("#shortcut-form").addEventListener("submit", addShortcut);
-  requireElement<HTMLButtonElement>("#nh-register").addEventListener("click", registerNativeHost);
 }
 
 function render(): void {
@@ -315,7 +287,17 @@ function render(): void {
         name.textContent = shortcut.name;
         const chord = document.createElement("code");
         chord.textContent = shortcut.chord;
-        label.append(input, name, chord);
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "shortcut-delete";
+        del.textContent = "×";
+        del.setAttribute("aria-label", `刪除快捷鍵：${shortcut.name}`);
+        del.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          void deleteShortcut(shortcut.id);
+        });
+        label.append(input, name, chord, del);
         list.append(label);
       });
     }
@@ -339,7 +321,7 @@ function render(): void {
     ? `「${shortcut.name}」${shortcut.chord} → ${formatTab(firstTarget)}、${formatTab(secondTarget)}`
     : "選取一個快捷鍵與兩個已連線目標後，才可發送。";
   requireElement("#result").textContent = dispatchResult;
-  requireElement("#nh-result").textContent = nativeHostResult;
+  requireElement("#registration-status").textContent = registrationStatus;
 
   requireElement<HTMLButtonElement>("#dispatch").disabled = !canDispatch();
   requireElement<HTMLButtonElement>('#shortcut-form button[type="submit"]').disabled = savingShortcut;
@@ -362,21 +344,28 @@ function populateTargets(selector: string, selected: string | undefined): void {
   if (select.selectedIndex === -1) select.selectedIndex = 0;
 }
 
-async function registerNativeHost(): Promise<void> {
-  const browser = nativeHostBrowser;
-  nativeHostResult = "正在登錄 native host…";
-  render();
+function renderRegistrationStatus(result: AutoRegisterResult): void {
+  if (!result.entries.length) {
+    registrationStatus = "native host 自動登錄未完成（無法解析 home 目錄）。";
+    return;
+  }
+  const failed = result.entries.filter((entry) => entry.error);
+  const hostsMissing = result.entries.filter((entry) => !entry.error && !entry.hostExists);
+  const names = result.entries.map((entry) => entry.browser).join("、");
+  let text = `native host 已自動登錄：${names}`;
+  if (hostsMissing.length) text += `（${hostsMissing.length} 筆缺少 host binary）`;
+  if (failed.length) {
+    text += `；${failed.length} 筆失敗：${failed.map((entry) => `${entry.browser}（${entry.error}）`).join("；")}`;
+  }
+  registrationStatus = text;
+}
+
+async function refreshRegistration(): Promise<void> {
   try {
-    const result = await invoke<NativeHostRegistrationResult>("register_native_host", {
-      request: {
-        browser,
-        hostPath: null,
-      },
-    });
-    const warning = result.hostExists ? "" : "（注意：native host binary 目前不存在）";
-    nativeHostResult = `已寫入 ${result.manifestPath}。${result.registryLocation}${warning}`;
-  } catch (error) {
-    nativeHostResult = `登錄失敗：${String(error)}`;
+    const result = await invoke<AutoRegisterResult>("native_host_registration");
+    renderRegistrationStatus(result);
+  } catch {
+    registrationStatus = "";
   }
   render();
 }
@@ -409,6 +398,25 @@ async function addShortcut(event: SubmitEvent): Promise<void> {
     savingShortcut = false;
     render();
   }
+}
+
+async function deleteShortcut(id: string): Promise<void> {
+  if (savingShortcut) return;
+  if (!repository) {
+    statusMessage = "持久化設定尚未可用。";
+    return;
+  }
+  const shortcut = settings.shortcuts.find((record) => record.id === id);
+  if (!shortcut) return;
+  const remaining = settings.shortcuts.filter((record) => record.id !== id);
+  if (selectedShortcutId === id) selectedShortcutId = remaining.at(0)?.id;
+  try {
+    settings = await repository.replaceShortcuts(remaining);
+    statusMessage = `已刪除「${shortcut.name}」。`;
+  } catch (error) {
+    statusMessage = error instanceof Error ? error.message : "無法刪除快捷鍵。";
+  }
+  render();
 }
 
 async function dispatchShortcut(): Promise<void> {
@@ -470,7 +478,13 @@ async function refreshRuntime(): Promise<void> {
       const rejection = snapshot.last_bridge_rejection
         ? `最近一次 native host 握手被拒絕：${BRIDGE_REJECTION_TEXT[snapshot.last_bridge_rejection] ?? snapshot.last_bridge_rejection}。`
         : "";
-      statusMessage = `尚無 native host 連線。請確認 App 已啟動、extension 已載入、且已在此 App 登錄 native host。${rejection}`;
+      const extReason = snapshot.last_host_disconnect_reason
+        ? `最近一次 extension 回報：${snapshot.last_host_disconnect_reason}。`
+        : "";
+      statusMessage =
+        "尚無 native host 連線。App 已自動把 native host 登錄到 Chrome（stable／Beta／Canary）、Chromium、Firefox 各自的目錄；請確認 extension 已載入。"
+        + rejection
+        + extReason;
     } else {
       statusMessage = `native host 已連線（${snapshot.connected_hosts} 個 session），但尚未收到 Browser Tab 快照；請重新載入 extension。`;
     }
@@ -495,6 +509,7 @@ async function bootstrap(): Promise<void> {
     statusMessage = error instanceof Error ? error.message : "持久化設定不可用。";
   }
   await refreshRuntime();
+  void refreshRegistration();
   window.setInterval(() => void refreshRuntime(), 1_000);
 }
 

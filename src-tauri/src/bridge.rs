@@ -26,6 +26,11 @@ struct Hello {
     browser: BrowserKind,
     browser_instance_id: String,
     session_nonce: String,
+    /// The browser's own diagnosis of the previous disconnect (e.g.
+    /// "Native messaging host not found"), reported so the App can show it
+    /// when no host is connected. Older extensions omit the field.
+    #[serde(default)]
+    last_disconnect_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -327,6 +332,7 @@ fn handle_message(
                 let mut coordinator = coordinator.lock();
                 coordinator.browser_ports.insert(key.clone(), host_sender);
                 coordinator.last_bridge_rejection = None;
+                coordinator.last_host_disconnect_reason = hello.last_disconnect_reason;
                 (json!({ "type": "ack", "protocol_major": PROTOCOL_MAJOR }), Some(key))
             }
             Ok(_) => {
@@ -834,7 +840,8 @@ mod tests {
             "protocol_major": PROTOCOL_MAJOR,
             "browser": "chrome",
             "browser_instance_id": "e2e-instance",
-            "session_nonce": "e2e-nonce"
+            "session_nonce": "e2e-nonce",
+            "last_disconnect_reason": "Native messaging host not found"
         });
         let mut host_stdin = child.stdin.take().expect("host stdin");
         write_framed(&mut host_stdin, &hello);
@@ -856,6 +863,12 @@ mod tests {
         assert!(
             registered,
             "real native host did not relay the browser hello to the App"
+        );
+        // The extension's own diagnosis of its previous failed connect must
+        // reach the coordinator so the UI can show it.
+        assert_eq!(
+            coordinator.lock().last_host_disconnect_reason.as_deref(),
+            Some("Native messaging host not found")
         );
 
         // The App's ack must come back out the host's stdout, native-messaging framed.

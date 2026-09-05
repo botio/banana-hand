@@ -34,6 +34,7 @@ export interface RuntimeSnapshot {
   cooldown_remaining_seconds: number;
   connected_hosts: number;
   last_bridge_rejection: string | null;
+  last_host_disconnect_reason: string | null;
 }
 
 export type DispatchOutcome =
@@ -41,9 +42,15 @@ export type DispatchOutcome =
   | { partial: { attempts: unknown[] } }
   | { attempted: { attempts: unknown[] } };
 
-export interface NativeHostRegistrationResult {
+export interface AutoRegisterEntry {
+  browser: string;
   manifestPath: string;
   registryLocation: string;
   hostPath: string;
   hostExists: boolean;
+  error?: string | null;
+}
+
+export interface AutoRegisterResult {
+  entries: AutoRegisterEntry[];
 }

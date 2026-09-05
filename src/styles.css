@@ -27,9 +27,11 @@ h2 { font-size: 28px; }
 .panel-heading > span { font-size: 13px; white-space: nowrap; }
 .shortcut-list { display: grid; gap: 10px; margin: 20px 0; }
 .shortcut-list.empty { min-height: 180px; display: grid; place-items: center; border: 1px dashed #968d7d; color: #685f52; }
-.shortcut-card { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; padding: 14px; border: 1px solid #958a78; border-radius: 12px; background: #fffaf0; cursor: pointer; }
+.shortcut-card { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 12px; padding: 14px; border: 1px solid #958a78; border-radius: 12px; background: #fffaf0; cursor: pointer; }
 .shortcut-card:has(input:checked) { border-color: #ae4b1c; outline: 2px solid #e78d51; }
 .shortcut-card code { padding: 5px 8px; border-radius: 6px; background: #e5ddd0; color: #4d4032; }
+.shortcut-card .shortcut-delete { border: 1px solid #c4b9a5; border-radius: 8px; padding: 4px 10px; background: #fffdf7; color: #685f52; font-size: 15px; font-weight: 700; line-height: 1.2; cursor: pointer; }
+.shortcut-card .shortcut-delete:hover { background: #f2e2d2; color: #ae4b1c; border-color: #ae4b1c; }
 .shortcut-form { display: grid; gap: 12px; margin-top: 24px; }
 label { display: grid; gap: 7px; font-size: 13px; font-weight: 700; }
 input, select { width: 100%; border: 1px solid #8d8477; border-radius: 8px; padding: 10px 11px; background: #fffdf7; color: #201f1d; }
@@ -44,12 +46,5 @@ input, select { width: 100%; border: 1px solid #8d8477; border-radius: 8px; padd
 .proof { min-height: 84px; padding: 16px; border: 1px dashed #94a39a; border-radius: 12px; color: #d6dfd8; line-height: 1.55; }
 .dispatch-button { width: 100%; margin-top: 16px; border: 0; border-radius: 10px; padding: 16px; background: #f0c46b; color: #222a28; font-size: 16px; font-weight: 900; }
 .result { min-height: 24px; color: #f0c46b; line-height: 1.45; }
-.native-host-panel { max-width: 1180px; margin: 18px auto 0; min-height: auto; background: #3a3527; color: #f2ead9; }
-.native-host-panel .contract { color: #cdc3ac; }
-.native-host-form { display: grid; grid-template-columns: 1.1fr 2fr auto; gap: 14px; align-items: end; margin-top: 20px; }
-.native-host-form select,
-.native-host-form input { width: 100%; padding: 11px 12px; border-radius: 10px; border: 1px solid #6b6152; background: #f4efe4; color: #222a28; }
-.native-host-form .dispatch-button { margin-top: 0; }
-.native-host-panel .result { color: #f0c46b; }
-@media (max-width: 1000px) { .native-host-form { grid-template-columns: 1fr; } }
+.registration-status { margin-top: 8px; font-size: 13px; color: #b9c2b8; line-height: 1.5; }
 @media (max-width: 1000px) { .shell { padding: 22px; } .workbench { grid-template-columns: 1fr; } .panel { min-height: auto; } }
