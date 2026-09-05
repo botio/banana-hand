@@ -98,6 +98,15 @@ def parse(d, off):
         n = ln & 0x7f; ln = int.from_bytes(d[off:off + n], "big"); off += n
     return tag, d[off:off + ln], off + ln
 
+def field(d, off):
+    """Return (new_off, raw_field); raw_field includes tag+length+content."""
+    start = off; off += 1
+    ln = d[off]; off += 1
+    if ln & 0x80:
+        n = ln & 0x7f; ln = int.from_bytes(d[off:off + n], "big"); off += n
+    off += ln
+    return off, d[start:off]
+
 SHA1_OID = bytes.fromhex("2b0e03021a")  # 1.3.14.3.2.26
 
 def build_macdata(digest, mac_salt):
@@ -118,19 +127,20 @@ p12 = pkcs12.serialize_key_and_certificates(
     "Banana Hand".encode("utf-8"), key, cert, None, BestAvailableEncryption(password.encode("utf-8"))
 )
 
-# Pull out the standard version INTEGER + the [0]-EXPLICIT authSafe field.
+# Pull out the raw version field and the [0]-EXPLICIT authSafe field, keeping
+# their tags+lengths so the reassembled PKCS12 stays valid DER.
 _, body, _ = parse(p12, 0)
-_, ver, o = parse(body, 0)
-t, authSafe, _ = parse(body, o)
-if t != 0xA0:
+o = 0
+o, ver_field = field(body, o)
+o, authSafe_field = field(body, o)
+if authSafe_field[0] != 0xA0:
     # Some builds emit the authSafe as a plain SEQUENCE; normalize to [0] EXPLICIT.
-    if t == 0x30:
-        authSafe = der(0xA0, authSafe)
+    if authSafe_field[0] == 0x30:
+        authSafe_field = der(0xA0, authSafe_field[1:])
     else:
-        raise SystemExit(f"unexpected authSafe tag {t:#x}")
-
-# Extract the authSafe *content* (without its [0] tag) for the "content" MAC variant.
-_, authSafe_content, _ = parse(authSafe, 0)
+        raise SystemExit(f"unexpected authSafe tag {authSafe_field[0]:#x}")
+# authSafe content (without its [0] tag) for the "content" MAC variant.
+_, authSafe_content, _ = parse(authSafe_field, 0)
 
 # ---------- emit candidate PKCS12 files ----------
 # (iterations, use_salt, mac_over_field, password_encoding)
@@ -143,18 +153,31 @@ variants = [
     (2048,   True,  True,  "utf8"),
 ]
 for i, (iterations, use_salt, over_field, pwenc) in enumerate(variants):
-    msg = authSafe if over_field else authSafe_content
+    msg = authSafe_field if over_field else authSafe_content
     mac_salt = os.urandom(16) if use_salt else b""
     pw = pw_bmp(password) if pwenc == "bmp" else pw_utf8(password)
     mac_bytes = mac(pw, mac_salt, iterations, msg)
     macData = der(0xA1, build_macdata(mac_bytes, mac_salt if use_salt else None))
-    out = der(0x30, ver + authSafe + macData)
+    out = der(0x30, ver_field + authSafe_field + macData)
     path = os.path.join(out_dir, f"v{i}.p12")
     with open(path, "wb") as f:
         f.write(out)
     print(f"  v{i}: iterations={iterations:<6} salt={'yes' if use_salt else 'no ':<3} "
           f"msg={'field' if over_field else 'content'} pw={pwenc} len={len(out)}")
 print(f"==> wrote {len(variants)} PKCS12 variants")
+# Diagnostic: can LibreSSL's parser read the structure we built? (helps tell
+# "bad DER" from "macOS rejects valid PKCS12" if the import still fails.)
+import subprocess
+try:
+    r = subprocess.run(
+        ["openssl", "pkcs12", "-info", "-in", os.path.join(out_dir, "v0.p12"),
+         "-passin", f"pass:{password}", "-nodes"],
+        capture_output=True, text=True, timeout=30)
+    print(f"  [openssl pkcs12 -info v0] rc={r.returncode}")
+    for line in (r.stdout + r.stderr).splitlines()[:16]:
+        print("   |", line)
+except Exception as e:
+    print("  [openssl pkcs12 -info v0] error:", e)
 PY
 
 echo "==> [4/4] Installing into keychain (trying each variant)"
