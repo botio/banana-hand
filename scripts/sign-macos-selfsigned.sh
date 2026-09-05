@@ -83,6 +83,51 @@ def mac(pw, salt, iterations, message):
 def pw_bmp(pw):  return pw.encode("utf-16-be") + b"\x00\x00"
 def pw_utf8(pw): return pw.encode("utf-8")
 
+def mac_hash(pw, salt, iterations, message, hash_name):
+    H = getattr(hashlib, hash_name)
+    key = kdf(pw, salt, 3, iterations, H().digest_size, hash_name)
+    return hmac.new(key, message, H).digest()
+
+OID_HASH = {
+    bytes.fromhex("2b0e03021a"): "sha1",
+    bytes.fromhex("608648016503040201"): "sha256",
+    bytes.fromhex("608648016503040202"): "sha384",
+    bytes.fromhex("608648016503040203"): "sha512",
+}
+HASH_OID = {"sha1": bytes.fromhex("2b0e03021a"), "sha256": bytes.fromhex("608648016503040201")}
+
+def _first_oid(algid_field):
+    try:
+        _, body, _ = parse(algid_field, 0)
+        _, f, _ = field(body, 0)
+        if f[0] == 0x06:
+            return parse(f, 0)[1]
+    except Exception:
+        pass
+    return None
+
+def patch_macdata(macdata_field, password, authSafe, force_hash=None, force_iter=None):
+    """Keep cryptography's macData structure (AlgId+salt+iteration) but recompute
+    the digest with the legacy PKCS#12 KDF. Returns new macData field bytes."""
+    _, mbody, _ = parse(macdata_field, 0)
+    off = 0
+    off, inner_seq = field(mbody, off)
+    off, salt_f = field(mbody, off)
+    off, iter_f = field(mbody, off)
+    _, salt_content, _ = parse(salt_f, 0)
+    _, iter_content, _ = parse(iter_f, 0)
+    iterations = force_iter if force_iter is not None else (int.from_bytes(iter_content, "big") or 2048)
+    _, iseq, _ = parse(inner_seq, 0)
+    o2 = 0
+    o2, algid = field(iseq, o2)
+    o2, digest_f = field(iseq, o2)
+    hash_name = force_hash or OID_HASH.get(_first_oid(algid), "sha256")
+    new_mac = mac_hash(pw_bmp(password), salt_content, iterations, authSafe, hash_name)
+    if force_hash:
+        algid = der(0x30, der(0x06, HASH_OID[hash_name]) + der(0x05, b""))
+    new_inner = der(0x30, algid + der(0x04, new_mac))
+    return der(0x30, new_inner + salt_f + iter_f)
+
 # ---------- minimal DER ----------
 def der_len(n):
     if n < 0x80: return bytes([n])
@@ -134,31 +179,30 @@ o = 0
 o, ver_field = field(body, o)
 o, authSafe_field = field(body, o)
 # authSafe content (for the "content" MAC variant); works for [0] or plain alike.
+# The original (cryptography) macData field — we patch its digest in place.
+o, macData_orig = field(body, o)
 _, authSafe_content, _ = parse(authSafe_field, 0)
 
 # ---------- emit candidate PKCS12 files ----------
-# (iterations, use_salt, salt_tag, mac_over_field, password_encoding)
+# Patch cryptography's macData digest in place with the legacy PKCS#12 KDF,
+# keeping its structure (AlgId hash, salt, iteration) that macOS accepts.
+# (force_hash, force_iter): None = "use what the file says".
 variants = [
-    (2048,   True,  0xA0,  True,  "bmp"),
-    (2048,   True,  0x04,  True,  "bmp"),
-    (2048,   False, 0x00,  True,  "bmp"),
-    (3,      True,  0x04,  True,  "bmp"),
-    (50000,  True,  0x04,  True,  "bmp"),
-    (2048,   True,  0xA0,  True,  "utf8"),
+    (None,   None),   # AlgId hash (SHA-256), file's iteration
+    ("sha1", None),   # force SHA-1 KDF
+    ("sha1", 2048),   # force SHA-1, common iteration
+    (None,   2048),   # SHA-256, common iteration
+    (None,   3),      # SHA-256, alt iteration
+    ("sha1", 3),      # SHA-1, alt iteration
 ]
-for i, (iterations, use_salt, salt_tag, over_field, pwenc) in enumerate(variants):
-    msg = authSafe_field if over_field else authSafe_content
-    mac_salt = os.urandom(16) if use_salt else b""
-    pw = pw_bmp(password) if pwenc == "bmp" else pw_utf8(password)
-    mac_bytes = mac(pw, mac_salt, iterations, msg)
-    macData = build_macdata(mac_bytes, mac_salt if use_salt else None, salt_tag)
+for i, (force_hash, force_iter) in enumerate(variants):
+    macData = patch_macdata(macData_orig, password, authSafe_field, force_hash, force_iter)
     out = der(0x30, ver_field + authSafe_field + macData)
     path = os.path.join(out_dir, f"v{i}.p12")
     with open(path, "wb") as f:
         f.write(out)
-    print(f"  v{i}: iter={iterations:<6} salt={('tag%02x' % salt_tag) if use_salt else 'no ':<6} "
-          f"msg={'field' if over_field else 'content'} pw={pwenc} len={len(out)}")
-print(f"==> wrote {len(variants)} PKCS12 variants")
+    print(f"  v{i}: force_hash={str(force_hash):<6} force_iter={str(force_iter):<6} len={len(out)}")
+print(f"==> wrote {len(variants)} patched PKCS12 variants")
 # Diagnostics: is cryptography's RAW output valid, and where does v0 diverge?
 import subprocess
 def _probe(label, data, fname):
