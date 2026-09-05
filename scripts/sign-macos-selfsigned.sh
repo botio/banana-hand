@@ -45,6 +45,13 @@ openssl req -new -x509 -key "$KEY" -out "$CERT" -days 3650 -sha256 \
   -addext "keyUsage=digitalSignature" \
   -addext "basicConstraints=critical,CA:FALSE" >/dev/null 2>&1
 
+# The runner's openssl (LibreSSL) uses the legacy KDF for the PKCS12 MAC —
+# the same OS family as `security import`. Try its native export first.
+echo "==> [2.5/4] Building PKCS12 with the runner's native openssl (LibreSSL)"
+openssl pkcs12 -export -inkey "$KEY" -in "$CERT" -name "Banana Hand" \
+  -password pass:"$PASS" -out "$WORK/libressl.p12" 2>&1 | grep -viE "warning" || true
+echo "  libressl.p12: $(stat -f%z "$WORK/libressl.p12" 2>/dev/null || stat -c%s "$WORK/libressl.p12") bytes"
+
 echo "==> [3/4] Building standard-macData PKCS12 (legacy SHA-1 KDF)"
 python3 - "$PASS" "$KEY" "$CERT" "$WORK" <<'PY'
 import hashlib, hmac, os, sys
@@ -279,9 +286,9 @@ echo "==> [4/4] Installing into keychain (trying each variant)"
 printf '%s' "$PASS" > "$WORK/passfile"
 security unlock-keychain -p "" 2>/dev/null || true
 found=""
-# Try the RAW cryptography file first (decisive: shows macOS's verdict on the
-# authSafe structure), then the standard-macData variants.
-names=("raw" "v0" "v1" "v2" "v3" "v4" "v5")
+# libressl (native LibreSSL export, legacy KDF) first, then the cryptography
+# patches, then the raw cryptography file for reference.
+names=("libressl" "v0" "v1" "v2" "v3" "v4" "v5")
 for i in "${!names[@]}"; do
   n="${names[$i]}"
   f="$WORK/$n.p12"
