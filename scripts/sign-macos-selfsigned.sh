@@ -115,7 +115,7 @@ from cryptography.x509 import load_pem_x509_certificate
 key = serialization.load_pem_private_key(open(key_pem_path, "rb").read(), password=None)
 cert = load_pem_x509_certificate(open(cert_pem_path, "rb").read())
 p12 = pkcs12.serialize_key_and_certificates(
-    "Banana Hand", key, cert, None, BestAvailableEncryption(password.encode("utf-8"))
+    "Banana Hand".encode("utf-8"), key, cert, None, BestAvailableEncryption(password.encode("utf-8"))
 )
 
 # Pull out the standard version INTEGER + the [0]-EXPLICIT authSafe field.
