@@ -40,10 +40,10 @@ jobs:
           - os: macos-latest
             target: aarch64-apple-darwin
             bundles: "dmg"
-            # No Apple Developer ID in CI, so the DMG is ad-hoc signed
-            # (macOS shows "damaged" until the user clears quarantine with
-            # one xattr command — see README + release notes).
-            macos_signing_identity: ""
+            # No Apple Developer ID in CI: "-" makes Tauri sign ad-hoc
+            # (codesign --sign -). macOS shows "damaged" until the user clears
+            # quarantine with one xattr command (README + release notes).
+            macos_signing_identity: "-"
 
     steps:
       - name: Checkout
