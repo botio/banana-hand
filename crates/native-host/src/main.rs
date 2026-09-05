@@ -44,10 +44,35 @@ enum HostError {
 /// it must exit non-zero so the browser's native-messaging layer treats the
 /// launch as failed and never mistakes it for a successful no-op.
 fn main() {
+    let args = std::env::args().collect::<Vec<_>>();
+    if args.iter().any(|arg| arg == "--self-check") {
+        match self_check() {
+            Ok(message) => {
+                println!("{message}");
+                return;
+            }
+            Err(error) => {
+                eprintln!("banana-hand-native-host: {error}");
+                std::process::exit(1);
+            }
+        }
+    }
     if let Err(error) = run() {
         eprintln!("banana-hand-native-host: {error}");
         std::process::exit(1);
     }
+}
+
+/// Verify the desktop half of the bridge without native-messaging framing:
+/// the config file must be readable and the desktop socket (or named pipe)
+/// must accept a connection. The app runs this on startup to surface
+/// failures the browser would hide — most importantly a host binary the
+/// operating system refuses to run (macOS Gatekeeper quarantine), where
+/// `connectNative` can only ever say "Native host has exited".
+fn self_check() -> Result<String, HostError> {
+    let config = read_bridge_config()?;
+    DesktopTransport::connect(&config)?;
+    Ok("self-check ok: desktop bridge reachable".into())
 }
 
 /// The desktop-side bridge connection. Exactly one variant exists per target

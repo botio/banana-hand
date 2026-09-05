@@ -35,6 +35,7 @@ export interface RuntimeSnapshot {
   connected_hosts: number;
   last_bridge_rejection: string | null;
   last_host_disconnect_reason: string | null;
+  host_self_check: string | null;
 }
 
 export type DispatchOutcome =

@@ -1,4 +1,4 @@
-use banana_hand_protocol::{Key, Modifier, ShortcutChord};
+use banana_hand_protocol::{BrowserKind, Key, Modifier, ShortcutChord};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -16,6 +16,10 @@ pub(crate) enum InputError {
     #[cfg(target_os = "windows")]
     #[error("Windows SendInput 未接受完整快捷鍵事件串流")]
     WindowsInjectionFailed,
+    #[error("目標視窗沒有成為前景（目前前景：{actual}）；發送已拒絕，請再試一次")]
+    ForegroundNotTarget {
+        actual: String,
+    },
     #[error("X11 display 無法開啟")]
     X11DisplayUnavailable,
     #[error("X11 server 未提供 XTEST extension")]
@@ -27,11 +31,38 @@ pub(crate) enum InputError {
 }
 
 pub(crate) trait InputAdapter {
+    /// Wait until the target browser's window is actually frontmost, so the
+    /// injected chord cannot land in whichever app was foreground a moment
+    /// earlier. Default: the platform cannot verify foreground (Linux), no-op.
+    fn verify_foreground(&self, _browser: &BrowserKind) -> Result<(), InputError> {
+        Ok(())
+    }
     fn send(&self, chord: &ShortcutChord) -> Result<(), InputError>;
 }
 
 pub(crate) struct PlatformInputAdapter;
 
+#[cfg(target_os = "macos")]
+impl InputAdapter for PlatformInputAdapter {
+    fn verify_foreground(&self, browser: &BrowserKind) -> Result<(), InputError> {
+        verify_macos_foreground(browser)
+    }
+    fn send(&self, chord: &ShortcutChord) -> Result<(), InputError> {
+        send_macos(chord)
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl InputAdapter for PlatformInputAdapter {
+    fn verify_foreground(&self, browser: &BrowserKind) -> Result<(), InputError> {
+        verify_windows_foreground(browser)
+    }
+    fn send(&self, chord: &ShortcutChord) -> Result<(), InputError> {
+        send_windows(chord)
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 impl InputAdapter for PlatformInputAdapter {
     fn send(&self, chord: &ShortcutChord) -> Result<(), InputError> {
         send_for_current_platform(chord)
@@ -45,16 +76,6 @@ fn send_for_current_platform(chord: &ShortcutChord) -> Result<(), InputError> {
         Ok("wayland") => Err(InputError::PortalPermissionRequired),
         _ => Err(InputError::UnsupportedSession),
     }
-}
-
-#[cfg(target_os = "windows")]
-fn send_for_current_platform(chord: &ShortcutChord) -> Result<(), InputError> {
-    send_windows(chord)
-}
-
-#[cfg(target_os = "macos")]
-fn send_for_current_platform(chord: &ShortcutChord) -> Result<(), InputError> {
-    send_macos(chord)
 }
 
 #[cfg(all(
@@ -231,17 +252,44 @@ fn windows_key(key: &Key) -> u16 {
 
 #[cfg(target_os = "macos")]
 fn send_macos(chord: &ShortcutChord) -> Result<(), InputError> {
+    use std::ffi::c_void;
+
     use core_graphics::{
         event::{CGEvent, CGEventFlags, CGEventTapLocation},
         event_source::{CGEventSource, CGEventSourceStateID},
     };
 
     #[link(name = "ApplicationServices", kind = "framework")]
+    #[link(name = "CoreFoundation", kind = "framework")]
     unsafe extern "C" {
-        fn AXIsProcessTrusted() -> bool;
+        fn AXIsProcessTrustedWithOptions(options: *const c_void) -> bool;
+        fn CFBooleanCreate(value: bool) -> *const c_void;
+        fn CFStringCreateWithCString(encoding: u32, string: *const i8) -> *const c_void;
+        fn CFDictionaryCreate(
+            info: *const c_void,
+            keys: *const *const c_void,
+            values: *const *const c_void,
+            count: isize,
+        ) -> *const c_void;
+        fn CFRelease(value: *const c_void);
     }
-    if !unsafe { AXIsProcessTrusted() } {
-        return Err(InputError::AccessibilityPermissionRequired);
+    // The options variant pops the system dialog (with a deep link into
+    // System Settings) when the grant is missing, instead of failing with a
+    // message the user has to translate into settings clicks.
+    unsafe {
+        let key =
+            CFStringCreateWithCString(0x0800_0100, b"kAXTrustedCheckOptionPrompt\0".as_ptr());
+        let prompt = CFBooleanCreate(true);
+        let keys = [key];
+        let values = [prompt];
+        let options = CFDictionaryCreate(std::ptr::null(), keys.as_ptr(), values.as_ptr(), 1);
+        let trusted = AXIsProcessTrustedWithOptions(options);
+        CFRelease(options);
+        CFRelease(key);
+        CFRelease(prompt);
+        if !trusted {
+            return Err(InputError::AccessibilityPermissionRequired);
+        }
     }
     let flags = chord
         .modifiers
@@ -275,6 +323,177 @@ fn send_macos(chord: &ShortcutChord) -> Result<(), InputError> {
     up.set_flags(flags);
     up.post(CGEventTapLocation::HID);
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn verify_macos_foreground(browser: &BrowserKind) -> Result<(), InputError> {
+    let expected = match browser {
+        BrowserKind::Chrome => [
+            "Google Chrome",
+            "Google Chrome Beta",
+            "Google Chrome Canary",
+            "Chromium",
+        ],
+        BrowserKind::Firefox => ["Firefox"],
+    };
+    // Window activation is asynchronous on macOS: until the window server
+    // commits the switch, the previously frontmost app still receives
+    // injected HID events.
+    for _ in 0..20 {
+        if let Some(owner) = frontmost_window_owner() {
+            if expected.iter().any(|name| *name == owner) {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                return Ok(());
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(75));
+    }
+    Err(InputError::ForegroundNotTarget {
+        actual: frontmost_window_owner().unwrap_or_default(),
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn frontmost_window_owner() -> Option<String> {
+    use std::ffi::c_void;
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGWindowListCopyWindowInfo(option: u32, relative_to_window: u32) -> *const c_void;
+        fn CFArrayGetCount(array: *const c_void) -> isize;
+        fn CFArrayGetValueAtIndex(array: *const c_void, index: isize) -> *const c_void;
+        fn CFDictionaryGetValue(dict: *const c_void, key: *const c_void) -> *const c_void;
+        fn CFStringCreateWithCString(encoding: u32, string: *const i8) -> *const c_void;
+        fn CFNumberGetValue(number: *const c_void, number_type: u32, value: *mut i64) -> bool;
+        fn CFRelease(value: *const c_void);
+    }
+
+    const UTF8: u32 = 0x0800_0100;
+    const SINT64: u32 = 6; // kCFNumberSInt64Type
+    const ON_SCREEN: u32 = 1; // kCGWindowListOptionOnScreenOnly
+    const EXCLUDE_DESKTOP: u32 = 2; // kCGWindowListExcludeDesktopElements
+
+    unsafe {
+        let array = CGWindowListCopyWindowInfo(ON_SCREEN | EXCLUDE_DESKTOP, 0);
+        if array.is_null() {
+            return None;
+        }
+        let layer_key = CFStringCreateWithCString(UTF8, b"kCGWindowLayer\0".as_ptr());
+        let owner_key = CFStringCreateWithCString(UTF8, b"kCGWindowOwnerName\0".as_ptr());
+        let mut found = None;
+        for index in 0..CFArrayGetCount(array) {
+            let window = CFArrayGetValueAtIndex(array, index);
+            let layer = CFDictionaryGetValue(window, layer_key);
+            if layer.is_null() {
+                continue;
+            }
+            let mut layer_value: i64 = -1;
+            if !CFNumberGetValue(layer, SINT64, &mut layer_value) || layer_value != 0 {
+                continue;
+            }
+            let owner = CFDictionaryGetValue(window, owner_key);
+            if !owner.is_null() {
+                found = cf_string_to_rust(owner);
+                break;
+            }
+        }
+        CFRelease(layer_key);
+        CFRelease(owner_key);
+        CFRelease(array);
+        found
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn cf_string_to_rust(value: *const std::ffi::c_void) -> Option<String> {
+    #[link(name = "CoreFoundation", kind = "framework")]
+    unsafe extern "C" {
+        fn CFStringGetLength(string: *const std::ffi::c_void) -> u32;
+        fn CFStringGetCString(
+            string: *const std::ffi::c_void,
+            buffer: *mut i8,
+            size: u32,
+            encoding: u32,
+        ) -> u32;
+    }
+
+    const UTF8: u32 = 0x0800_0100;
+    unsafe {
+        let length = CFStringGetLength(value) as usize;
+        let mut buffer = vec![0i8; length + 1];
+        let written = CFStringGetCString(value, buffer.as_mut_ptr(), (length + 1) as u32, UTF8);
+        if written == 0 {
+            return None;
+        }
+        Some(String::from_utf8_lossy(&buffer[..written as usize]).into_owned())
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn verify_windows_foreground(browser: &BrowserKind) -> Result<(), InputError> {
+    let expected = match browser {
+        BrowserKind::Chrome => ["chrome.exe"],
+        BrowserKind::Firefox => ["firefox.exe"],
+    };
+    for _ in 0..20 {
+        if let Some(owner) = foreground_process_name() {
+            if expected
+                .iter()
+                .any(|name| owner.eq_ignore_ascii_case(name))
+            {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                return Ok(());
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(75));
+    }
+    Err(InputError::ForegroundNotTarget {
+        actual: foreground_process_name().unwrap_or_default(),
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn foreground_process_name() -> Option<String> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowThreadProcessId,
+    };
+
+    let window = unsafe { GetForegroundWindow() };
+    if window == 0 {
+        return None;
+    }
+    let mut process_id: u32 = 0;
+    unsafe {
+        GetWindowThreadProcessId(window, &mut process_id);
+    }
+    if process_id == 0 {
+        return None;
+    }
+    let handle = unsafe {
+        OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id)
+    };
+    if handle == 0 {
+        return None;
+    }
+    let mut buffer = [0u16; 261];
+    let mut size: u32 = buffer.len() as u32;
+    let written = unsafe {
+        QueryFullProcessImageNameW(handle, 0, buffer.as_mut_ptr().cast::<i16>(), &mut size)
+    };
+    let name = if written == 0 {
+        None
+    } else {
+        Some(String::from_utf16_lossy(&buffer[..size as usize]))
+    };
+    unsafe {
+        CloseHandle(handle);
+    }
+    name.and_then(|path| path.rsplit('\\').next().map(str::to_owned))
 }
 
 #[cfg(target_os = "macos")]

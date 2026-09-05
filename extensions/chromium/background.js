@@ -3,6 +3,15 @@ const NATIVE_HOST_NAME = "dev.bananahand.dispatch_host";
 const INSTANCE_KEY = "browserInstanceId";
 const RECONNECT_BASE_MS = 3000;
 const RECONNECT_MAX_MS = 30000;
+// The MV3 service worker can be reaped mid-backoff (idle workers die after
+// ~30s, and a pending setTimeout does not keep the worker alive). A
+// periodic alarm is the only event guaranteed to wake it, so the retry
+// loop restarts at least once a minute no matter what killed the worker.
+const CONNECT_WATCH_ALARM = "connect-watch";
+
+function ensureConnectWatch() {
+  chrome.alarms.create(CONNECT_WATCH_ALARM, { periodInMinutes: 1 });
+}
 
 let nativePort;
 let sessionNonce = crypto.randomUUID();
@@ -105,6 +114,10 @@ function connectNativeHost() {
     nativePort = undefined;
     if (chrome.runtime.lastError) {
       lastDisconnectReason = String(chrome.runtime.lastError.message ?? chrome.runtime.lastError);
+      // The App only learns the reason on the next hello, which never comes
+      // when the port never connected — so also log it where the user can
+      // find it: chrome://extensions → Banana Hand → service worker console.
+      console.warn("[banana-hand] native host connect failed:", lastDisconnectReason);
     }
     scheduleReconnect();
   });
@@ -150,7 +163,19 @@ chrome.runtime.onStartup.addListener(() => {
     clearTimeout(reconnectTimer);
     reconnectTimer = undefined;
   }
+  ensureConnectWatch();
   void ensureBrowserInstanceId().then(connectNativeHost);
 });
 
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== CONNECT_WATCH_ALARM || nativePort) return;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = undefined;
+  }
+  reconnectDelayMs = RECONNECT_BASE_MS;
+  void ensureBrowserInstanceId().then(connectNativeHost);
+});
+
+ensureConnectWatch();
 void ensureBrowserInstanceId().then(connectNativeHost);

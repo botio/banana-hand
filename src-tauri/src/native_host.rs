@@ -129,7 +129,11 @@ pub fn manifest_file_name() -> String {
 }
 
 /// Build the native-messaging manifest JSON for a browser.
-pub fn build_manifest(browser: &BrowserKind, host_path: &Path) -> Value {
+pub fn build_manifest(
+    browser: &BrowserKind,
+    host_path: &Path,
+    discovered_ids: &[String],
+) -> Value {
     let mut manifest = serde_json::json!({
         "name": HOST_NAME,
         "description": MANIFEST_DESCRIPTION,
@@ -143,9 +147,20 @@ pub fn build_manifest(browser: &BrowserKind, host_path: &Path) -> Value {
             manifest
         }
         BrowserKind::Chrome => {
-            manifest["allowed_origins"] = Value::Array(vec![Value::String(format!(
-                "chrome-extension://{CHROMIUM_EXTENSION_ID}/"
-            ))]);
+            // Besides the id pinned by the manifest key, include every
+            // Banana Hand extension id found on this machine: an unpacked
+            // install from a release before the key was pinned (or from a
+            // different unpack path) has a path-derived id, and Chrome skips
+            // a manifest whose allowlist misses the calling extension.
+            let mut origins = vec![format!("chrome-extension://{CHROMIUM_EXTENSION_ID}/")];
+            for id in discovered_ids {
+                let origin = format!("chrome-extension://{id}/");
+                if !origins.contains(&origin) {
+                    origins.push(origin);
+                }
+            }
+            manifest["allowed_origins"] =
+                Value::Array(origins.into_iter().map(Value::String).collect());
             manifest
         }
     }
@@ -266,6 +281,7 @@ pub fn register_in(
     home: &Path,
     localappdata: &Path,
     host_path: &Path,
+    discovered_ids: &[String],
 ) -> Result<RegisterNativeHostResult, RegistrationError> {
     let host_exists = host_path.exists();
     let manifest_path = manifest_file_path(browser, home, localappdata);
@@ -275,7 +291,7 @@ pub fn register_in(
             RegistrationError::WriteFailed(manifest_path.clone(), error.to_string())
         })?;
     }
-    let manifest = build_manifest(&browser.wire_kind(), host_path);
+    let manifest = build_manifest(&browser.wire_kind(), host_path, discovered_ids);
     let encoded = serde_json::to_string_pretty(&manifest).map_err(|error| {
         RegistrationError::WriteFailed(manifest_path.clone(), error.to_string())
     })?;
@@ -305,9 +321,10 @@ pub fn auto_register(
 ) -> AutoRegisterResult {
     let host = host_path.map(Path::to_path_buf).unwrap_or_else(default_host_path);
     let host_exists = host.exists();
+    let discovered = discover_extension_ids(&chrome_profile_roots(home, localappdata));
     let mut result = AutoRegisterResult::default();
     for browser in ALL_BROWSERS {
-        match register_in(browser, home, localappdata, &host) {
+        match register_in(browser, home, localappdata, &host, &discovered) {
             Ok(entry) => result.entries.push(AutoRegisterEntry {
                 browser: browser.as_str().to_owned(),
                 manifest_path: entry.manifest_path,
@@ -338,6 +355,151 @@ pub fn auto_register_native_hosts(app: &tauri::AppHandle) -> Result<AutoRegister
         .map_err(|error| error.to_string())?;
     let localappdata_string = std::env::var("LOCALAPPDATA").unwrap_or_default();
     Ok(auto_register(&home, Path::new(&localappdata_string), None))
+}
+
+/// The profile roots of the Chrome-family browsers whose `Extensions/`
+/// trees hold installed extensions.
+pub fn chrome_profile_roots(home: &Path, localappdata: &Path) -> Vec<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = home;
+        vec![
+            localappdata.join("Google/Chrome/User Data"),
+            localappdata.join("Google/Chrome Beta/User Data"),
+            localappdata.join("Google/Chrome Canary/User Data"),
+            localappdata.join("Chromium/User Data"),
+        ]
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = localappdata;
+        vec![
+            home.join("Library/Application Support/Google/Chrome"),
+            home.join("Library/Application Support/Google/Chrome Beta"),
+            home.join("Library/Application Support/Google/Chrome Canary"),
+            home.join("Library/Application Support/Chromium"),
+        ]
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        let _ = localappdata;
+        vec![
+            home.join(".config/google-chrome"),
+            home.join(".config/google-chrome-beta"),
+            home.join(".config/google-chrome-canary"),
+            home.join(".config/chromium"),
+        ]
+    }
+}
+
+/// Find installed Banana Hand Chromium extensions and return their ids.
+///
+/// The manifest key pins one extension id, but an unpacked install from a
+/// release before the key was pinned — or from a different unpack path on a
+/// different machine — has a path-derived id. This makes registration
+/// self-correcting: whatever Chrome actually installed is allowlisted,
+/// without ever asking the user for their id.
+pub fn discover_extension_ids(profile_roots: &[PathBuf]) -> Vec<String> {
+    let mut found = Vec::new();
+    for root in profile_roots {
+        let Ok(profiles) = fs::read_dir(root) else {
+            continue;
+        };
+        for profile in profiles.flatten() {
+            let Ok(extension_dirs) = fs::read_dir(profile.path().join("Extensions")) else {
+                continue;
+            };
+            for extension in extension_dirs.flatten() {
+                if !is_banana_hand_extension(&extension.path()) {
+                    continue;
+                }
+                let id = extension.file_name().to_string_lossy().into_owned();
+                if !found.contains(&id) {
+                    found.push(id);
+                }
+            }
+        }
+    }
+    found.sort();
+    found.dedup();
+    found
+}
+
+/// True when an `Extensions/<id>` directory holds an installed copy of our
+/// extension, judged by the newest version directory's manifest name.
+fn is_banana_hand_extension(extension_dir: &Path) -> bool {
+    let Ok(versions) = fs::read_dir(extension_dir) else {
+        return false;
+    };
+    let mut newest: Option<PathBuf> = None;
+    for version in versions.flatten() {
+        let name = version.file_name();
+        match newest.as_ref().and_then(|path| path.file_name()) {
+            None => newest = Some(version.path()),
+            Some(current) => {
+                if name > current {
+                    newest = Some(version.path());
+                }
+            }
+        }
+    }
+    let Some(newest) = newest else {
+        return false;
+    };
+    let Ok(raw) = fs::read_to_string(newest.join("manifest.json")) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+        return false;
+    };
+    value.get("name").and_then(Value::as_str)
+        == Some("Banana Hand Browser Bridge")
+}
+
+/// Run the native host's `--self-check` once on startup: it reads the bridge
+/// config and opens a connection to the desktop socket, so a host binary the
+/// operating system refuses to run (macOS Gatekeeper quarantine) or a broken
+/// sidecar layout shows up here before any browser can report it.
+pub fn run_self_check() -> Option<String> {
+    let host = default_host_path();
+    if !host.exists() {
+        return Some(format!(
+            "failed: native host binary missing at {}",
+            host.display()
+        ));
+    }
+    let output = std::process::Command::new(&host)
+        .arg("--self-check")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .ok()?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    if output.status.success() {
+        return Some(format!("ok: {stdout}"));
+    }
+    let status = output.status;
+    let detail = if !stderr.is_empty() {
+        stderr
+    } else {
+        #[cfg(unix)]
+        let message = {
+            use std::os::unix::process::ExitStatusExt;
+            match status.signal() {
+                Some(signal) => format!(
+                    "host was killed by the operating system (signal {signal}); on macOS this \
+                     is usually a Gatekeeper quarantine attribute — try: xattr -dr \
+                     com.apple.quarantine \"<app path>\""
+                ),
+                None => format!("host exited with status {status:?}"),
+            }
+        };
+        #[cfg(not(unix))]
+        let message = format!("host exited with status {status:?}");
+        message
+    };
+    Some(format!("failed: {detail}"))
 }
 
 /// Write the HKCU registry value that points a Chrome channel at the manifest
@@ -412,6 +574,7 @@ mod tests {
         let manifest = build_manifest(
             &BrowserKind::Firefox,
             Path::new("/opt/banana-hand/banana-hand-native-host"),
+            &[],
         );
         assert_eq!(manifest["name"], HOST_NAME);
         assert_eq!(manifest["type"], "stdio");
@@ -422,7 +585,7 @@ mod tests {
 
     #[test]
     fn chromium_manifest_uses_fixed_extension_id() {
-        let manifest = build_manifest(&BrowserKind::Chrome, Path::new("/app/host.exe"));
+        let manifest = build_manifest(&BrowserKind::Chrome, Path::new("/app/host.exe"), &[]);
         assert_eq!(
             manifest["allowed_origins"][0],
             format!("chrome-extension://{CHROMIUM_EXTENSION_ID}/")
@@ -475,7 +638,8 @@ mod tests {
         let host = temp.join("banana-hand-native-host");
         fs::write(&host, b"fake native host").expect("write fake host");
         let result =
-            register_in(HostBrowser::Firefox, &temp, Path::new(""), &host).expect("register firefox");
+            register_in(HostBrowser::Firefox, &temp, Path::new(""), &host, &[])
+                .expect("register firefox");
         assert!(result.manifest_path.exists());
         assert!(result.host_exists);
         assert_eq!(result.host_path, host);
@@ -530,6 +694,65 @@ mod tests {
                 }
             }
         }
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn discovery_adds_installed_extension_ids_to_allowed_origins() {
+        let temp = std::env::temp_dir().join(format!(
+            "banana-hand-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|value| value.as_nanos())
+                .unwrap_or(0)
+        ));
+        // The fake tree holds the current release's unpacked install (fixed
+        // id) and a pre-key v0.1.0-style install (path-derived id), plus one
+        // unrelated extension that must be ignored.
+        let fixed_install = temp.join("Default").join("Extensions").join(CHROMIUM_EXTENSION_ID);
+        fs::create_dir_all(fixed_install.join("0.1.0")).expect("create fixed dir");
+        fs::write(
+            fixed_install.join("0.1.0").join("manifest.json"),
+            r#"{"name": "Banana Hand Browser Bridge", "version": "0.1.0"}"#,
+        )
+        .expect("write fixed manifest");
+        let path_derived =
+            temp.join("Profile 1").join("Extensions").join("abcdefghijklmnopabcdefghijklmn");
+        fs::create_dir_all(path_derived.join("1.0.0")).expect("create extension dir");
+        fs::write(
+            path_derived.join("1.0.0").join("manifest.json"),
+            r#"{"name": "Banana Hand Browser Bridge", "version": "1.0.0"}"#,
+        )
+        .expect("write manifest");
+        let other = temp.join("Profile 1").join("Extensions").join("qrstuvwxyzabcdefghijklmnopqrstuvwxyz");
+        fs::create_dir_all(other.join("2.0")).expect("create other dir");
+        fs::write(
+            other.join("2.0").join("manifest.json"),
+            r#"{"name": "Unrelated Extension"}"#,
+        )
+        .expect("write other manifest");
+
+        let ids = discover_extension_ids(&[temp.clone()]);
+        assert_eq!(
+            ids,
+            vec![
+                "abcdefghijklmnopabcdefghijklmn".to_owned(),
+                CHROMIUM_EXTENSION_ID.to_owned(),
+            ]
+        );
+        // The fixed id stays first even when also discovered; a duplicate of
+        // it is collapsed, so the allowlist never repeats an origin.
+        let manifest = build_manifest(&BrowserKind::Chrome, Path::new("/app/host"), &ids);
+        let origins = manifest["allowed_origins"]
+            .as_array()
+            .expect("allowed origins array");
+        assert_eq!(origins.len(), 2);
+        assert_eq!(
+            origins[0],
+            format!("chrome-extension://{CHROMIUM_EXTENSION_ID}/")
+        );
+        assert_eq!(origins[1], "chrome-extension://abcdefghijklmnopabcdefghijklmn/");
         let _ = fs::remove_dir_all(&temp);
     }
 

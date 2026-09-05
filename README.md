@@ -48,16 +48,26 @@ Banana Hand 讓「一個快捷鍵」同時對兩個瀏覽器分頁做動作。�
 ### 第 3 步：讓 Browser 找到 Host（自動）
 
 App 每次啟動時會自動把 native host 登錄到所有已知的 browser 目錄——
-Chrome（stable／Beta／Canary）、Chromium、Firefox——兩個 extension 都使用固定 ID，
-不需要手動登錄、選 browser 或貼任何值。App 上方的狀態列會顯示本次自動登錄的結果
-（各目錄路徑、host binary 是否存在）。
+Chrome（stable／Beta／Canary）、Chromium、Firefox——不需要手動登錄、選 browser 或
+貼任何值。App 上方的狀態列會顯示本次自動登錄的結果（各目錄路徑、host binary 是否存在）。
+
+登錄時會**掃描本機已安裝的 Banana Hand extension**（各 Chrome profile 的
+`Extensions/` 樹），把它們實際的 extension ID 一併寫進 manifest 的 allowlist
+（除了 manifest key 固定的 ID 之外）。這樣即使是早期版本解壓安裝、ID 由路徑
+衍生的 extension，Chrome 也會接受 manifest——不需要知道或抄寫任何 ID。
+
+App 也會在啟動時對 sidecar 執行一次 `--self-check`（讀 bridge 設定、連 App 的
+socket）；若失敗（例如 macOS Gatekeeper 把 host binary 杀掉），狀態列會顯示
+`native host self-check：…`。
 
 extension 連線後，App 會自動顯示可選 Browser Tab；若已載入舊版 extension，請到
 `chrome://extensions`（或 `about:debugging`）對 Banana Hand 按「重新載入」一次。
 
 extension 斷線後會自動重試（3 秒起、最多 30 秒間隔），**App 與 browser 的啟動順序不再重要**：
 先開 App、後開 browser，或先開 browser、後開 App，extension 都會等到 native host 可用再完成
-握手。App 重啟後 token 更換，extension 也會在數秒內自動重新握手。
+握手。Chrome 的 service worker 若被系統收回（idle 約 30 秒），extension 靠每分鐘一次
+的 alarm 保證重試循環會重新啟動，不會卡死。App 重啟後 token 更換，extension 也會在數秒內
+自動重新握手。
 
 ### 第 4 步：發送
 1. 在「快捷鍵庫」按「新增快捷鍵」，填名稱；組合欄位**點一下再直接按鍵**（例如按住 `Ctrl+Shift` 再按 `K`），
@@ -77,14 +87,22 @@ extension 斷線後會自動重試（3 秒起、最多 30 秒間隔），**App �
     其目錄不同，需要手動登錄（見「Browser extension 與 native host」）。
   - 狀態列若出現「最近一次 extension 回報」，那是 browser 對連不上 host 的原始診斷
     （例如 `Native messaging host not found`＝manifest 不在該 browser 的目錄、
-    `Native host has exited`＝host binary 存在但啟動即退出）。
+    `Native host has exited`＝host binary 存在但啟動即退出）。如果從第一次就完全連不上
+    （連回報都沒有），到 `chrome://extensions` → Banana Hand →「service worker」console
+    看 `[banana-hand] native host connect failed: …` 的原始 lastError。
+  - 狀態列若出現「native host self-check：failed…」，代表 App 自己都啟動不了 host
+    binary（常見於 macOS 隔離屬性未清）；照提示處理後重開 App。
   - 「native host 已連線，但尚未收到 Browser Tab 快照」＝ extension 的 service worker 可能睡了：
     到 `chrome://extensions` 對 Banana Hand 按「重新載入」。
   - 「協定版本不符」＝ App 與 extension 版本不同步：下載同版本 release 的 extension 重新載入。
 - **macOS 第一次連不上**：DMG 的 app 與 sidecar native host 都帶隔離屬性；若 browser 啟不起 native
   host，先執行 `xattr -dr com.apple.quarantine "/Applications/Banana Hand.app"`（見第 1 步），
   extension 會自動重試，不需要手動重載。
-- **按下發送沒反應／顯示被拒**：看「發送」下方的結果；若提示權限不足，到系統設定授予輸入權限（macOS 為「輔助功能」）。
+- **按下發送沒反應／顯示被拒**：看「發送」下方的結果。macOS／Windows 上，App 送出前會
+  先等目標 browser 視窗**真的成為前景**（最多約 1.5 秒）；若超时被拒（「目標視窗沒有成為
+  前景」），通常是視窗還在切換，再按一次即可。若提示 Accessibility 未授權，macOS 會直接
+  彈出系統對話框（含跳轉系統設定的捷徑）；若清單裡有**多條**「Banana Hand」（舊版本留下
+  的），先移除舊的、只保留目前版本並打勾。
 - **快捷鍵沒送達**：這是「盡力發送」，App 只保證「有嘗試」，不保證網站收到（見下方「發送契約」）。
 - **重啟 App 要重選分頁**：設計如此，分頁選取是 session-only（連線本身會自動恢復）。
 
@@ -147,8 +165,8 @@ Chrome／Firefox 的 installer 登錄位置必須依官方文件寫入。Brave �
 |---|---|---|---|
 | Linux X11 | Unix socket（`$XDG_RUNTIME_DIR/banana-hand/`，0700） | XTEST | 已驗證（本機） |
 | Linux Wayland | 同上 | **fail-closed**：`PortalPermissionRequired` | spec-only，見下 |
-| Windows | named pipe（`%LOCALAPPDATA%\Banana Hand\runtime\`，per-pid pipe） | `SendInput` event stream | 實機待驗 |
-| macOS Apple Silicon | Unix socket（`~/Library/Caches/Banana Hand/runtime`，0700） | CGEvent（檢查 Accessibility） | 實機待驗（ad-hoc DMG + xattr 清除隔離 + 授 Accessibility） |
+| Windows | named pipe（`%LOCALAPPDATA%\Banana Hand\runtime\`，per-pid pipe） | `SendInput` event stream（送前驗證前景窗口） | 實機待驗 |
+| macOS Apple Silicon | Unix socket（`~/Library/Caches/Banana Hand/runtime`，0700） | CGEvent（Accessibility 提示 + 前景窗口驗證） | 實機待驗（ad-hoc DMG + xattr 清除隔離 + 授 Accessibility） |
 
 - **Linux Wayland**：portal 注入是 spec-only。`XDG_SESSION_TYPE=wayland` 時維持
   fail-closed 閘門（`PortalPermissionRequired`），不嘗試靜默注入。精確的

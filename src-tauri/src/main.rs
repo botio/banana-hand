@@ -27,6 +27,10 @@ struct AppState {
     input_adapter: PlatformInputAdapter,
     /// The native-host auto-registration outcome, computed once on startup.
     native_host_registration: Mutex<native_host::AutoRegisterResult>,
+    /// The one-shot `--self-check` result of the sidecar binary, computed on
+    /// startup and surfaced in the status line when no extension is
+    /// connected.
+    host_self_check: Mutex<Option<String>>,
 }
 
 #[derive(Default)]
@@ -59,6 +63,7 @@ struct RuntimeSnapshot {
     connected_hosts: u32,
     last_bridge_rejection: Option<String>,
     last_host_disconnect_reason: Option<String>,
+    host_self_check: Option<String>,
 }
 
 #[tauri::command]
@@ -70,6 +75,7 @@ fn runtime_snapshot(state: State<'_, AppState>) -> RuntimeSnapshot {
         connected_hosts: coordinator.browser_ports.len() as u32,
         last_bridge_rejection: coordinator.last_bridge_rejection.clone(),
         last_host_disconnect_reason: coordinator.last_host_disconnect_reason.clone(),
+        host_self_check: state.host_self_check.lock().clone(),
     }
 }
 
@@ -132,6 +138,12 @@ fn request_dispatch(
             reason: prepare_failure_reason(&first_prepare),
         });
     }
+    // Window activation is asynchronous on macOS/Windows; the previously
+    // frontmost app can still receive the injected chord until the switch
+    // commits, so wait for the target browser before posting.
+    state.input_adapter
+        .verify_foreground(&request.first_target.browser)
+        .map_err(|error| error.to_string())?;
     if let Err(error) = state.input_adapter.send(&request.shortcut.chord) {
         return Ok(DispatchOutcome::Rejected {
             reason: error.to_string(),
@@ -161,6 +173,9 @@ fn request_dispatch(
             ],
         });
     }
+    state.input_adapter
+        .verify_foreground(&request.second_target.browser)
+        .map_err(|error| error.to_string())?;
     if let Err(error) = state.input_adapter.send(&request.shortcut.chord) {
         return Ok(DispatchOutcome::Partial {
             attempts: vec![
@@ -260,6 +275,7 @@ fn main() {
             coordinator,
             input_adapter: PlatformInputAdapter,
             native_host_registration: Mutex::new(native_host::AutoRegisterResult::default()),
+            host_self_check: Mutex::new(None),
         })
         .setup(move |app| {
             bridge::start(bridge_coordinator.clone()).map_err(std::io::Error::other)?;
@@ -274,6 +290,7 @@ fn main() {
                 }
             };
             *app.state::<AppState>().native_host_registration.lock() = registration;
+            *app.state::<AppState>().host_self_check.lock() = native_host::run_self_check();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

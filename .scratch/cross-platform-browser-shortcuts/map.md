@@ -34,6 +34,7 @@ Standing preferences:
 - [決定跨平台驗證與發布證據](issues/10-platform-validation-and-release-proof.md): 每個 release 需有 12 個平台／工作階段／browser 配對的實機證據（Chrome–Chrome、Firefox–Firefox、Chrome–Firefox）；Brave 不屬首版支援範圍。
 - [修復 extension 一次連線失聯與快捷鍵逐字輸入](issues/12-extension-auto-reconnect-and-chord-recorder.md): extension 斷線後指數退避自動重試（啟動順序不再重要）、App 依 connected_hosts / last_bridge_rejection 分級診斷並清掉 stale session；快捷鍵組合改為按鍵錄製器（裸 Esc 取消、裸 F 鍵可單獨、其餘須帶修飾鍵），存儲格式不變。
 - [修復 Chrome 通道連線、快捷鍵刪除與自動登錄](issues/13-chrome-channel-registration-delete-and-autodetect.md): App 啟動時自動把固定-ID native host manifest 寫入 Chrome（stable／Beta／Canary）、Chromium、Firefox 各通道目錄（Windows Firefox 改寫 Mozilla 標準目錄）；extension 上報 browser 的 `lastError` 斷線原因供 App 分級診斷並加 port orphan guard；快捷鍵庫每項增加「×」刪除。
+- [修復 macOS 前景競態、Chrome ID 錯配與 worker 死亡](issues/14-foreground-verify-id-discovery-selfcheck.md): dispatch 送出前輪詢驗證目標 browser 真為前景（macOS window owner／Windows foreground process，~1.5 秒上限，fail-closed）；manifest allowlist 自動寫入本機已安裝 extension 的實際 ID（含 v0.1.0 路徑派生 ID）；Chrome extension 加 1 分鐘 alarm 防 service worker 死亡；native host 新增 `--self-check`（bridge 設定 + socket），App 啟動時執行並顯示在狀態列；macOS Accessibility 改走系統提示對話框。
 
 ## Not yet specified
 

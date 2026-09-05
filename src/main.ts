@@ -24,6 +24,7 @@ let snapshot: RuntimeSnapshot = {
   connected_hosts: 0,
   last_bridge_rejection: null,
   last_host_disconnect_reason: null,
+  host_self_check: null,
 };
 let selectedShortcutId: string | undefined;
 let selectedFirstTarget: string | undefined;
@@ -481,10 +482,14 @@ async function refreshRuntime(): Promise<void> {
       const extReason = snapshot.last_host_disconnect_reason
         ? `最近一次 extension 回報：${snapshot.last_host_disconnect_reason}。`
         : "";
+      const selfCheck = snapshot.host_self_check
+        ? `native host self-check：${snapshot.host_self_check}。`
+        : "";
       statusMessage =
         "尚無 native host 連線。App 已自動把 native host 登錄到 Chrome（stable／Beta／Canary）、Chromium、Firefox 各自的目錄；請確認 extension 已載入。"
         + rejection
-        + extReason;
+        + extReason
+        + selfCheck;
     } else {
       statusMessage = `native host 已連線（${snapshot.connected_hosts} 個 session），但尚未收到 Browser Tab 快照；請重新載入 extension。`;
     }
