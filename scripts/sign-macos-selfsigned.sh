@@ -161,11 +161,12 @@ echo "==> [4/4] Installing into keychain (trying each variant)"
 # Import the first variant `security import` accepts. A macData whose MAC macOS
 # cannot verify is rejected entirely (nothing is added), so we can safely try
 # each candidate against the same keychain until a real identity appears.
+security unlock-keychain -p "" 2>/dev/null || true
 found=""
 for i in 0 1 2 3 4 5; do
   f="$WORK/v$i.p12"
   echo "  trying variant v$i ..."
-  if ! security import -P "$PASS" -A "$f" 2>"$WORK/import-err"; then
+  if ! security import -p "$PASS" -A -T /usr/bin/codesign "$f" 2>"$WORK/import-err"; then
     echo "    import failed: $(head -1 "$WORK/import-err" 2>/dev/null)"
   fi
   if security find-identity -p codesigning 2>/dev/null | grep -q "$CERT_CN"; then
