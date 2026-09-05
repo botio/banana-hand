@@ -151,7 +151,7 @@ for i, (iterations, use_salt, over_field, pwenc) in enumerate(variants):
     mac_salt = os.urandom(16) if use_salt else b""
     pw = pw_bmp(password) if pwenc == "bmp" else pw_utf8(password)
     mac_bytes = mac(pw, mac_salt, iterations, msg)
-    macData = der(0xA1, build_macdata(mac_bytes, mac_salt if use_salt else None))
+    macData = build_macdata(mac_bytes, mac_salt if use_salt else None)  # plain SEQUENCE (0x30), no [1]
     out = der(0x30, ver_field + authSafe_field + macData)
     path = os.path.join(out_dir, f"v{i}.p12")
     with open(path, "wb") as f:
