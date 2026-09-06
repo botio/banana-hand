@@ -4,6 +4,8 @@
 
 以 Tauri 2 + Rust 建立的桌面發送協調器。使用者在每次 App 啟動後，從已連線的 Chrome 或 Firefox WebExtension 選出兩個不同的 Browser Tab，再將快捷鍵庫中選定的單一組合按鍵依序做盡力原生發送。
 
+[隱私權政策](PRIVACY.md)：說明分頁資訊、本機通訊、資料保留與使用者控制。
+
 ## 下載與 Preview Release
 
 從 [GitHub Preview Releases](https://github.com/botio/banana-hand/releases) 下載桌面 App 與瀏覽器插件。
