@@ -128,6 +128,9 @@ fn request_dispatch(
         }
     }
 
+    state.input_adapter
+        .activate(&request.first_target.browser)
+        .map_err(|error| error.to_string())?;
     let first_prepare = prepare_target(
         &state.coordinator,
         &request.first_target,
@@ -156,6 +159,9 @@ fn request_dispatch(
         detail: "已嘗試以 native input 注入快捷鍵；不保證送達。".into(),
     };
 
+    state.input_adapter
+        .activate(&request.second_target.browser)
+        .map_err(|error| error.to_string())?;
     let second_prepare = prepare_target(
         &state.coordinator,
         &request.second_target,

@@ -26,9 +26,19 @@ pub(crate) enum InputError {
     KeycodeUnavailable,
     #[error("XTEST 拒絕輸入事件")]
     X11InjectionFailed,
+    #[cfg(target_os = "macos")]
+    #[error("無法將 {name} 帶到前景（{detail}）；發送已拒絕")]
+    BrowserActivationFailed { name: String, detail: String },
 }
 
 pub(crate) trait InputAdapter {
+    /// Bring the target browser's app to the desktop foreground. A
+    /// WebExtension cannot pull a background browser to the front on
+    /// macOS, so the desktop app does it before the in-browser tab
+    /// activation and the foreground gate run. Default: no-op.
+    fn activate(&self, _browser: &BrowserKind) -> Result<(), InputError> {
+        Ok(())
+    }
     /// Wait until the target browser's window is actually frontmost, so the
     /// injected chord cannot land in whichever app was foreground a moment
     /// earlier. Default: the platform cannot verify foreground (Linux), no-op.
@@ -42,6 +52,9 @@ pub(crate) struct PlatformInputAdapter;
 
 #[cfg(target_os = "macos")]
 impl InputAdapter for PlatformInputAdapter {
+    fn activate(&self, browser: &BrowserKind) -> Result<(), InputError> {
+        activate_macos(browser)
+    }
     fn verify_foreground(&self, browser: &BrowserKind) -> Result<(), InputError> {
         verify_macos_foreground(browser)
     }
@@ -357,6 +370,103 @@ fn verify_macos_foreground(browser: &BrowserKind) -> Result<(), InputError> {
     })
 }
 
+#[cfg(target_os = "macos")]
+fn activate_macos(browser: &BrowserKind) -> Result<(), InputError> {
+    let display = match browser {
+        BrowserKind::Chrome => "Chrome",
+        BrowserKind::Firefox => "Firefox",
+    };
+    let candidates: &[&str] = match browser {
+        BrowserKind::Chrome => &[
+            "Google Chrome",
+            "Google Chrome Beta",
+            "Google Chrome Canary",
+            "Chromium",
+        ],
+        BrowserKind::Firefox => &["Firefox"],
+    };
+    let listing = std::process::Command::new("ps")
+        .args(["-eo", "command"])
+        .output()
+        .map_err(|error| InputError::BrowserActivationFailed {
+            name: display.to_owned(),
+            detail: error.to_string(),
+        })?;
+    let listing = String::from_utf8_lossy(&listing.stdout);
+    let app = pick_running_candidate(candidates, &listing).ok_or_else(|| {
+        InputError::BrowserActivationFailed {
+            name: display.to_owned(),
+            detail: "未執行".to_owned(),
+        }
+    })?;
+    let status = std::process::Command::new("open")
+        .args(["-a", app])
+        .status()
+        .map_err(|error| InputError::BrowserActivationFailed {
+            name: app.to_owned(),
+            detail: error.to_string(),
+        })?;
+    if !status.success() {
+        return Err(InputError::BrowserActivationFailed {
+            name: app.to_owned(),
+            detail: format!("exit {status}"),
+        });
+    }
+    Ok(())
+}
+
+/// The first candidate whose app bundle path appears in a `ps -eo command`
+/// listing. Pure so the matching is testable on every platform; the
+/// macOS-only caller performs the listing and the `open -a` itself.
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn pick_running_candidate<'a>(candidates: &[&'a str], listing: &str) -> Option<&'a str> {
+    candidates
+        .iter()
+        .copied()
+        .find(|name| listing.contains(&format!("{name}.app/Contents/MacOS/{name}")))
+}
+
+#[cfg(test)]
+mod activation_tests {
+    use super::pick_running_candidate;
+
+    const CHROME_CANDIDATES: &[&str] = &[
+        "Google Chrome",
+        "Google Chrome Beta",
+        "Google Chrome Canary",
+        "Chromium",
+    ];
+
+    #[test]
+    fn stable_wins_when_several_chrome_family_apps_are_running() {
+        let listing = concat!(
+            "/usr/bin/zsh\n",
+            "/Applications/Google Chrome Beta.app/Contents/MacOS/Google Chrome Beta\n",
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome\n",
+        );
+        assert_eq!(
+            pick_running_candidate(CHROME_CANDIDATES, listing),
+            Some("Google Chrome")
+        );
+    }
+
+    #[test]
+    fn beta_wins_when_it_is_the_only_one_running() {
+        let listing = "/usr/bin/zsh\n/Applications/Google Chrome Beta.app/Contents/MacOS/Google Chrome Beta\n";
+        assert_eq!(
+            pick_running_candidate(CHROME_CANDIDATES, listing),
+            Some("Google Chrome Beta")
+        );
+    }
+
+    #[test]
+    fn nothing_running_is_none() {
+        assert_eq!(
+            pick_running_candidate(CHROME_CANDIDATES, "/usr/bin/zsh\n"),
+            None
+        );
+    }
+}
 #[cfg(target_os = "macos")]
 fn frontmost_window_owner() -> Option<String> {
     use core_graphics::window::{

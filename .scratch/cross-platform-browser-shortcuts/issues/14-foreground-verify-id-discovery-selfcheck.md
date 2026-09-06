@@ -171,3 +171,26 @@ onDisconnect，因此握手拒絕分支必須主動清掉 port 並排程重連�
 是非 persistent event page，新增與 Chromium 相同的每分鐘 alarm，
 避免 App 長時間未開時 setTimeout 隨背景頁卸載而消失。Firefox 斷線
 原因改讀正式 API 的 `port.error`，不再讀 Chrome 專用 lastError。
+
+### 2026-09-06：v0.1.7 實機回報——前景不是 browser（「目前前景：G」）
+
+v0.1.7 上 Chrome／Firefox 都連上了，但發送皆被前景閘門拒絕，
+錯誤文字顯示「目前前景：G」（使用者的終端機／聊天程序，單字
+owner name）。機制：使用者在 browser 之外的 App 中操作 Banana
+Hand，而 WebExtension 的 `windows.update({ focused: true })` 只
+能在該 browser 已是前景 App 時生效——browser 停留在背景，閘門
+按設計 fail-closed（閘門本身沒壞，錯誤文字也第一次顯示了真正
+原因）。
+
+修正（ADR 0004，v0.1.8）：macOS `InputAdapter::activate` 在
+in-browser 啟用／聚焦與閘門之前，用 `ps -eo command` 挑出正在
+執行的 Chrome 系 App（stable 優先、絕不啟動未執行的 App）再
+`open -a`；找不到即整次拒絕。候選匹配是純函式
+`pick_running_candidate`，Linux/Windows/macOS 都有測試。
+
+限制：同時執行多個 Chrome channel 時只能挑一個（stable 優先），
+目標 tab 若在另一 channel 可能送到同系錯誤 window——preview
+階段限制。Windows `activate` 為 no-op（未回報問題前不加 FFI）。
+
+仍待：使用者 Mac 實機確認（快捷鍵實際送達、`G` 的實際程序
+名稱）。
