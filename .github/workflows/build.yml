@@ -169,7 +169,9 @@ jobs:
           mkdir -p release-assets/browser-extensions
           cp dist/chromium-extension/*.zip release-assets/browser-extensions/
           cp dist/firefox-temporary-extension/*.zip release-assets/browser-extensions/
-          cp dist/firefox-extension/*.xpi release-assets/browser-extensions/
+          xpis=(dist/firefox-extension/*.xpi)
+          test "${#xpis[@]}" -eq 1
+          cp "${xpis[0]}" "release-assets/browser-extensions/banana-hand-firefox-${GITHUB_REF_NAME#v}-signed.xpi"
 
       - name: Publish GitHub preview release
         env:
