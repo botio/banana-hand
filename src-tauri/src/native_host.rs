@@ -2,14 +2,11 @@
 //!
 //! A browser launches the native host through a per-browser native-messaging
 //! manifest that points at the host binary. On Linux/macOS the manifest is a
-//! JSON file in a per-browser directory; on Windows the Chrome family is
-//! pointed at a manifest file through HKCU registry values and Firefox reads
-//! the manifest from its standard directory.
+//! JSON file in a per-browser directory; on Windows each browser is pointed
+//! at a manifest file through the default value of an HKCU host registry key.
 //!
-//! Each Chrome channel (stable, Beta, Canary) and Chromium look in their own
-//! native-messaging directory, so auto-registration writes one manifest into
-//! every known channel: the user's actual browser finds it regardless of
-//! which one they run, and the app never needs to ask which browser they
+//! Auto-registration covers every known browser channel. Unix channels use
+//! separate directories; Windows Chrome-family channels share a manifest.
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -171,9 +168,9 @@ pub fn build_manifest(browser: &BrowserKind, host_path: &Path, discovered_ids: &
 ///   for Firefox.
 /// - Linux: `~/.config/{google-chrome,google-chrome-beta,google-chrome-canary,chromium}/
 ///   NativeMessagingHosts` and `~/.mozilla/native-messaging-hosts`.
-/// - Windows: the Chrome channels share `%LOCALAPPDATA%\Banana Hand\native-host-manifests`
-///   (pointed at by an HKCU registry value); Firefox reads
-///   `%LOCALAPPDATA%\Mozilla\Firefox\NativeMessagingHosts` directly.
+/// - Windows: the Chrome channels share `%LOCALAPPDATA%\Banana Hand\native-host-manifests`;
+///   Firefox uses `%LOCALAPPDATA%\Mozilla\Firefox\NativeMessagingHosts`.
+///   These are storage locations; browsers discover both through HKCU registry keys.
 pub fn manifest_dir(browser: HostBrowser, home: &Path, localappdata: &Path) -> PathBuf {
     #[cfg(target_os = "windows")]
     {
@@ -230,19 +227,11 @@ fn describe_location(browser: HostBrowser, home: &Path, localappdata: &Path) -> 
     #[cfg(target_os = "windows")]
     {
         let _ = (home, localappdata);
-        match browser {
-            HostBrowser::Firefox => {
-                format!(
-                    "{}（檔案目錄）",
-                    manifest_dir(browser, home, localappdata).display()
-                )
-            }
-            _ => format!(
-                "HKCU\\{}\\{}（值指向 manifest 檔）",
-                windows_registry_subkey(browser),
-                HOST_NAME
-            ),
-        }
+        format!(
+            "HKCU\\{}\\{}（預設值指向 manifest 檔）",
+            windows_registry_subkey(browser),
+            HOST_NAME
+        )
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -252,7 +241,7 @@ fn describe_location(browser: HostBrowser, home: &Path, localappdata: &Path) -> 
     }
 }
 
-/// The HKCU subkey a Chrome channel reads on Windows.
+/// The HKCU parent key for a browser's native-messaging hosts on Windows.
 #[cfg(target_os = "windows")]
 fn windows_registry_subkey(browser: HostBrowser) -> &'static str {
     match browser {
@@ -261,7 +250,7 @@ fn windows_registry_subkey(browser: HostBrowser) -> &'static str {
         }
         HostBrowser::ChromeBeta => "Software\\Google\\ChromeBeta\\NativeMessagingHosts",
         HostBrowser::ChromeCanary => "Software\\Google\\ChromeCanary\\NativeMessagingHosts",
-        HostBrowser::Firefox => unreachable!("Firefox uses a file directory on Windows"),
+        HostBrowser::Firefox => "Software\\Mozilla\\NativeMessagingHosts",
     }
 }
 
@@ -281,19 +270,25 @@ pub fn default_host_path() -> PathBuf {
 }
 
 /// Write the manifest for one channel and (on Windows) point the registry at
-/// it.
+/// it. `home` and `localappdata` select manifest storage; on Windows the
+/// browser discovers the host through an HKCU registry child key.
 ///
-/// `home` and `localappdata` are explicit so the pure write flow is unit
-/// testable against a temp directory.
-pub fn register_in(
+/// An explicit Windows root lets regression tests exercise real registration
+/// beneath a private key without redirecting HKCU for other threads.
+fn register_in(
     browser: HostBrowser,
     home: &Path,
     localappdata: &Path,
     host_path: &Path,
     discovered_ids: &[String],
+    #[cfg(target_os = "windows")] registry_root: windows_sys::Win32::System::Registry::HKEY,
 ) -> Result<RegisterNativeHostResult, RegistrationError> {
     let host_exists = host_path.exists();
     let manifest_path = manifest_file_path(browser, home, localappdata);
+    #[cfg(target_os = "windows")]
+    let manifest_path = std::path::absolute(&manifest_path).map_err(|error| {
+        RegistrationError::WriteFailed(manifest_path.clone(), error.to_string())
+    })?;
 
     if let Some(parent) = manifest_path.parent() {
         fs::create_dir_all(parent).map_err(|error| {
@@ -309,7 +304,7 @@ pub fn register_in(
     })?;
 
     #[cfg(target_os = "windows")]
-    set_windows_registry(browser, &manifest_path)?;
+    set_windows_registry(registry_root, browser, &manifest_path)?;
 
     Ok(RegisterNativeHostResult {
         manifest_path,
@@ -328,6 +323,21 @@ pub fn auto_register(
     localappdata: &Path,
     host_path: Option<&Path>,
 ) -> AutoRegisterResult {
+    auto_register_root(
+        home,
+        localappdata,
+        host_path,
+        #[cfg(target_os = "windows")]
+        windows_sys::Win32::System::Registry::HKEY_CURRENT_USER,
+    )
+}
+
+fn auto_register_root(
+    home: &Path,
+    localappdata: &Path,
+    host_path: Option<&Path>,
+    #[cfg(target_os = "windows")] registry_root: windows_sys::Win32::System::Registry::HKEY,
+) -> AutoRegisterResult {
     let host = host_path
         .map(Path::to_path_buf)
         .unwrap_or_else(default_host_path);
@@ -335,7 +345,15 @@ pub fn auto_register(
     let discovered = discover_extension_ids(&chrome_profile_roots(home, localappdata));
     let mut result = AutoRegisterResult::default();
     for browser in ALL_BROWSERS {
-        match register_in(browser, home, localappdata, &host, &discovered) {
+        match register_in(
+            browser,
+            home,
+            localappdata,
+            &host,
+            &discovered,
+            #[cfg(target_os = "windows")]
+            registry_root,
+        ) {
             Ok(entry) => result.entries.push(AutoRegisterEntry {
                 browser: browser.as_str().to_owned(),
                 manifest_path: entry.manifest_path,
@@ -509,27 +527,26 @@ pub fn run_self_check() -> Option<String> {
     Some(format!("failed: {detail}"))
 }
 
-/// Write the HKCU registry value that points a Chrome channel at the manifest
-/// file.
+/// Point a browser's host child key at the manifest using its default REG_SZ value.
 #[cfg(target_os = "windows")]
 fn set_windows_registry(
+    registry_root: windows_sys::Win32::System::Registry::HKEY,
     browser: HostBrowser,
     manifest_path: &Path,
 ) -> Result<(), RegistrationError> {
     use windows_sys::Win32::System::Registry::{
-        HKEY, HKEY_CURRENT_USER, KEY_WOW64_64KEY, KEY_WRITE, REG_SZ, RegCloseKey, RegCreateKeyExW,
+        HKEY, KEY_WOW64_64KEY, KEY_WRITE, REG_SZ, RegCloseKey, RegCreateKeyExW,
         RegSetValueExW,
     };
 
-    let subkey = windows_registry_subkey(browser);
-    let subkey_wide = wide(subkey);
-    let value_wide = wide(HOST_NAME);
+    let subkey = format!("{}\\{HOST_NAME}", windows_registry_subkey(browser));
+    let subkey_wide = wide(&subkey);
     let data_wide = wide(&manifest_path.to_string_lossy());
 
     let mut hkey: HKEY = std::ptr::null_mut();
     let status = unsafe {
         RegCreateKeyExW(
-            HKEY_CURRENT_USER,
+            registry_root,
             subkey_wide.as_ptr(),
             0,
             std::ptr::null(),
@@ -548,7 +565,7 @@ fn set_windows_registry(
     let status = unsafe {
         RegSetValueExW(
             hkey,
-            value_wide.as_ptr(),
+            std::ptr::null(),
             0,
             REG_SZ,
             data_wide.as_ptr().cast(),
@@ -575,6 +592,100 @@ fn wide(value: &str) -> Vec<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "windows")]
+    struct TestRegistry {
+        key: windows_sys::Win32::System::Registry::HKEY,
+        path: Vec<u16>,
+    }
+
+    #[cfg(target_os = "windows")]
+    impl TestRegistry {
+        fn new() -> Self {
+            use windows_sys::Win32::System::Registry::{
+                HKEY_CURRENT_USER, KEY_ALL_ACCESS, KEY_WOW64_64KEY, RegCreateKeyExW,
+            };
+
+            let path = wide(&format!(
+                "Software\\Banana Hand\\RegistrationTests\\{}-{:032x}",
+                std::process::id(),
+                rand::random::<u128>()
+            ));
+            let mut key = std::ptr::null_mut();
+            let status = unsafe {
+                RegCreateKeyExW(
+                    HKEY_CURRENT_USER,
+                    path.as_ptr(),
+                    0,
+                    std::ptr::null(),
+                    0,
+                    KEY_ALL_ACCESS | KEY_WOW64_64KEY,
+                    std::ptr::null(),
+                    &mut key,
+                    std::ptr::null_mut(),
+                )
+            };
+            assert_eq!(status, 0, "create isolated test registry root");
+            Self { key, path }
+        }
+
+        fn manifest_path(&self, host_subkey: &str) -> PathBuf {
+            use windows_sys::Win32::System::Registry::{
+                REG_SZ, RRF_RT_REG_SZ, RRF_SUBKEY_WOW6464KEY, RegGetValueW,
+            };
+
+            let subkey = wide(host_subkey);
+            let mut value_type = 0;
+            let mut byte_len = 0;
+            let status = unsafe {
+                RegGetValueW(
+                    self.key,
+                    subkey.as_ptr(),
+                    std::ptr::null(),
+                    RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY,
+                    &mut value_type,
+                    std::ptr::null_mut(),
+                    &mut byte_len,
+                )
+            };
+            assert_eq!(status, 0, "browser must find the host key's default value");
+            assert_eq!(value_type, REG_SZ);
+            assert_eq!(byte_len % 2, 0);
+            let mut data = vec![0u16; byte_len as usize / 2];
+            let status = unsafe {
+                RegGetValueW(
+                    self.key,
+                    subkey.as_ptr(),
+                    std::ptr::null(),
+                    RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY,
+                    &mut value_type,
+                    data.as_mut_ptr().cast(),
+                    &mut byte_len,
+                )
+            };
+            assert_eq!(status, 0, "read manifest location from registry");
+            assert_eq!(data.pop(), Some(0), "REG_SZ must be NUL terminated");
+            let path = PathBuf::from(String::from_utf16(&data).expect("UTF-16 registry path"));
+            assert!(path.is_absolute(), "browser needs an absolute manifest path");
+            path
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    impl Drop for TestRegistry {
+        fn drop(&mut self) {
+            use windows_sys::Win32::System::Registry::{
+                HKEY_CURRENT_USER, KEY_WOW64_64KEY, RegCloseKey, RegDeleteKeyExW, RegDeleteTreeW,
+            };
+
+            // Remove only this test's subtree, including when an assertion unwinds.
+            unsafe {
+                RegDeleteTreeW(self.key, std::ptr::null());
+                RegCloseKey(self.key);
+                RegDeleteKeyExW(HKEY_CURRENT_USER, self.path.as_ptr(), KEY_WOW64_64KEY, 0);
+            }
+        }
+    }
 
     #[test]
     fn firefox_manifest_uses_fixed_id_and_allowed_extensions() {
@@ -651,8 +762,28 @@ mod tests {
         // A stand-in native host binary inside the temp dir so host_exists is true.
         let host = temp.join("banana-hand-native-host");
         fs::write(&host, b"fake native host").expect("write fake host");
-        let result = register_in(HostBrowser::Firefox, &temp, Path::new(""), &host, &[])
-            .expect("register firefox");
+        #[cfg(target_os = "windows")]
+        let registry = TestRegistry::new();
+        let result = register_in(
+            HostBrowser::Firefox,
+            &temp,
+            &temp,
+            &host,
+            &[],
+            #[cfg(target_os = "windows")]
+            registry.key,
+        )
+        .expect("register firefox");
+        #[cfg(target_os = "windows")]
+        {
+            let registered = registry.manifest_path(
+                "Software\\Mozilla\\NativeMessagingHosts\\dev.bananahand.dispatch_host",
+            );
+            assert_eq!(registered, result.manifest_path);
+            assert!(result.registry_location.starts_with(
+                "HKCU\\Software\\Mozilla\\NativeMessagingHosts\\dev.bananahand.dispatch_host"
+            ));
+        }
         assert!(result.manifest_path.exists());
         assert!(result.host_exists);
         assert_eq!(result.host_path, host);
@@ -665,7 +796,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_register_writes_one_manifest_per_channel() {
+    fn auto_register_makes_each_browser_manifest_discoverable() {
         let temp = std::env::temp_dir().join(format!(
             "banana-hand-test-{}-{}",
             std::process::id(),
@@ -678,7 +809,15 @@ mod tests {
         let host = temp.join("banana-hand-native-host");
         fs::write(&host, b"fake native host").expect("write fake host");
 
-        let result = auto_register(&temp, Path::new(""), Some(&host));
+        #[cfg(target_os = "windows")]
+        let registry = TestRegistry::new();
+        let result = auto_register_root(
+            &temp,
+            &temp,
+            Some(&host),
+            #[cfg(target_os = "windows")]
+            registry.key,
+        );
         assert_eq!(result.entries.len(), ALL_BROWSERS.len());
         assert!(
             result.entries.iter().all(|entry| entry.error.is_none()),
@@ -689,10 +828,26 @@ mod tests {
                 .map(|entry| &entry.error)
                 .collect::<Vec<_>>()
         );
-        // Every entry wrote a distinct manifest with the right allowlist.
-        let mut seen = std::collections::HashSet::new();
+        // Channels may share storage; each browser must still discover a
+        // manifest with its own protocol's allowlist.
         for entry in &result.entries {
-            assert!(seen.insert(entry.manifest_path.clone()));
+            assert!(entry.manifest_path.starts_with(&temp));
+            #[cfg(target_os = "windows")]
+            match entry.browser.as_str() {
+                "firefox" => assert_eq!(
+                    registry.manifest_path(
+                        "Software\\Mozilla\\NativeMessagingHosts\\dev.bananahand.dispatch_host"
+                    ),
+                    entry.manifest_path
+                ),
+                "chrome" => assert_eq!(
+                    registry.manifest_path(
+                        "Software\\Google\\Chrome\\NativeMessagingHosts\\dev.bananahand.dispatch_host"
+                    ),
+                    entry.manifest_path
+                ),
+                _ => {}
+            }
             let parsed: Value =
                 serde_json::from_str(&fs::read_to_string(&entry.manifest_path).unwrap()).unwrap();
             assert_eq!(parsed["name"], HOST_NAME);

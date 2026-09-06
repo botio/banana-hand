@@ -156,9 +156,11 @@ macOS 為 `~/Library/Application Support/Google/Chrome{, Beta, Canary}/NativeMes
 `~/Library/Application Support/Chromium/NativeMessagingHosts/`、
 `~/Library/Application Support/Mozilla/NativeMessagingHosts/`；Linux 為
 `~/.config/{google-chrome,google-chrome-beta,google-chrome-canary,chromium}/NativeMessagingHosts/`、
-`~/.mozilla/native-messaging-hosts/`；Windows 的 Chrome 系共用
-`%LOCALAPPDATA%\Banana Hand\native-host-manifests\` 並登記 HKCU registry 值，
-Firefox 直接寫入 `%LOCALAPPDATA%\Mozilla\Firefox\NativeMessagingHosts\`。
+`~/.mozilla/native-messaging-hosts/`；Windows 的 Chrome 系與 Firefox 都以 HKCU registry
+的子機碼（`Software\Google\Chrome\NativeMessagingHosts\<host>`、`Software\Mozilla\NativeMessagingHosts\<host>`）
+預設值指向 manifest 檔，manifest 檔則分別存於
+`%LOCALAPPDATA%\Banana Hand\native-host-manifests\` 與
+`%LOCALAPPDATA%\Mozilla\Firefox\NativeMessagingHosts\`。
 manifest 中的 host 路徑預設為 App 執行檔的同層 sibling（sidecar），因此每次啟動都會
 自動刷新——App 搬家之後也不需要手動重登錄。
 

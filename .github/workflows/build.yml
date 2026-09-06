@@ -115,6 +115,32 @@ jobs:
           codesign --display --verbose=4 "${app}"
           hdiutil detach "${mount_point}"
 
+      - name: Verify Windows native host registration
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        run: cargo test -p banana-hand --target ${{ matrix.target }} native_host
+
+      - name: Smoke-test installed Windows startup and browser discovery
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem "target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe" | Select-Object -First 1
+          if (-not $installer) { throw "No NSIS installer found." }
+          $install = Join-Path $env:RUNNER_TEMP "banana hand install"
+          $diag = Join-Path $env:RUNNER_TEMP "banana-hand-windows-smoke"
+          pwsh -File scripts/verify-windows-startup.ps1 `
+            -InstallerPath $installer.FullName `
+            -InstallDirectory $install `
+            -DiagnosticsDirectory $diag `
+            -StartupTimeoutSeconds 90
+
+      - name: Upload Windows smoke diagnostics
+        if: failure() && matrix.target == 'x86_64-pc-windows-msvc'
+        uses: actions/upload-artifact@v4
+        with:
+          name: banana-hand-windows-smoke-diagnostics
+          path: ${{ runner.temp }}/banana-hand-windows-smoke/**
+          if-no-files-found: warn
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
