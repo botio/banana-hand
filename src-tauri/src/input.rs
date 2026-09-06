@@ -343,8 +343,8 @@ fn send_macos(chord: &ShortcutChord) -> Result<(), InputError> {
 }
 
 #[cfg(target_os = "macos")]
-fn verify_macos_foreground(browser: &BrowserKind) -> Result<(), InputError> {
-    let expected: &[&str] = match browser {
+fn expected_owners(browser: &BrowserKind) -> &[&str] {
+    match browser {
         BrowserKind::Chrome => &[
             "Google Chrome",
             "Google Chrome Beta",
@@ -352,12 +352,27 @@ fn verify_macos_foreground(browser: &BrowserKind) -> Result<(), InputError> {
             "Chromium",
         ],
         BrowserKind::Firefox => &["Firefox"],
-    };
+    }
+}
+
+/// A bare owner name like "G" means nothing to the user; the window title
+/// identifies the application. Pure so it is testable on every platform.
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn describe_frontmost(owner: &str, title: Option<&str>) -> String {
+    match title {
+        Some(title) if !title.is_empty() => format!("{owner}「{title}」"),
+        _ => owner.to_owned(),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn verify_macos_foreground(browser: &BrowserKind) -> Result<(), InputError> {
+    let expected = expected_owners(browser);
     // Window activation is asynchronous on macOS: until the window server
     // commits the switch, the previously frontmost app still receives
     // injected HID events.
     for _ in 0..20 {
-        if let Some(owner) = frontmost_window_owner() {
+        if let Some((owner, _)) = frontmost_window() {
             if expected.iter().any(|name| *name == owner) {
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 return Ok(());
@@ -365,8 +380,9 @@ fn verify_macos_foreground(browser: &BrowserKind) -> Result<(), InputError> {
         }
         std::thread::sleep(std::time::Duration::from_millis(75));
     }
+    let (owner, title) = frontmost_window().unwrap_or_default();
     Err(InputError::ForegroundNotTarget {
-        actual: frontmost_window_owner().unwrap_or_default(),
+        actual: describe_frontmost(&owner, title.as_deref()),
     })
 }
 
@@ -376,15 +392,6 @@ fn activate_macos(browser: &BrowserKind) -> Result<(), InputError> {
         BrowserKind::Chrome => "Chrome",
         BrowserKind::Firefox => "Firefox",
     };
-    let candidates: &[&str] = match browser {
-        BrowserKind::Chrome => &[
-            "Google Chrome",
-            "Google Chrome Beta",
-            "Google Chrome Canary",
-            "Chromium",
-        ],
-        BrowserKind::Firefox => &["Firefox"],
-    };
     let listing = std::process::Command::new("ps")
         .args(["-eo", "command"])
         .output()
@@ -393,26 +400,46 @@ fn activate_macos(browser: &BrowserKind) -> Result<(), InputError> {
             detail: error.to_string(),
         })?;
     let listing = String::from_utf8_lossy(&listing.stdout);
-    let app = pick_running_candidate(candidates, &listing).ok_or_else(|| {
+    let app = pick_running_candidate(expected_owners(browser), &listing).ok_or_else(|| {
         InputError::BrowserActivationFailed {
             name: display.to_owned(),
             detail: "未執行".to_owned(),
         }
     })?;
-    let status = std::process::Command::new("open")
-        .args(["-a", app])
-        .status()
-        .map_err(|error| InputError::BrowserActivationFailed {
-            name: app.to_owned(),
-            detail: error.to_string(),
-        })?;
-    if !status.success() {
-        return Err(InputError::BrowserActivationFailed {
-            name: app.to_owned(),
-            detail: format!("exit {status}"),
-        });
+    let expected = expected_owners(browser);
+    for _round in 0..2 {
+        let status = std::process::Command::new("open")
+            .args(["-a", app])
+            .status()
+            .map_err(|error| InputError::BrowserActivationFailed {
+                name: app.to_owned(),
+                detail: error.to_string(),
+            })?;
+        if !status.success() {
+            return Err(InputError::BrowserActivationFailed {
+                name: app.to_owned(),
+                detail: format!("exit {status}"),
+            });
+        }
+        // Activation is asynchronous: verify against the on-screen window
+        // list and retry `open` once if the switch has not committed.
+        for _ in 0..8 {
+            if let Some((owner, _)) = frontmost_window() {
+                if expected.iter().any(|name| *name == owner) {
+                    return Ok(());
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }
     }
-    Ok(())
+    let (owner, title) = frontmost_window().unwrap_or_default();
+    Err(InputError::BrowserActivationFailed {
+        name: app.to_owned(),
+        detail: format!(
+            "open -a 成功，但 browser 視窗未成為前景（目前前景：{}）；可能位於其他桌面（Space）或全螢幕空間",
+            describe_frontmost(&owner, title.as_deref())
+        ),
+    })
 }
 
 /// The first candidate whose app bundle path appears in a `ps -eo command`
@@ -428,7 +455,7 @@ pub(crate) fn pick_running_candidate<'a>(candidates: &[&'a str], listing: &str) 
 
 #[cfg(test)]
 mod activation_tests {
-    use super::pick_running_candidate;
+    use super::{describe_frontmost, pick_running_candidate};
 
     const CHROME_CANDIDATES: &[&str] = &[
         "Google Chrome",
@@ -466,9 +493,23 @@ mod activation_tests {
             None
         );
     }
+
+    #[test]
+    fn describe_frontmost_includes_the_window_title() {
+        assert_eq!(
+            describe_frontmost("G", Some("zsh — bash")),
+            "G「zsh — bash」".to_owned()
+        );
+    }
+
+    #[test]
+    fn describe_frontmost_falls_back_to_the_owner_name() {
+        assert_eq!(describe_frontmost("G", None), "G".to_owned());
+        assert_eq!(describe_frontmost("G", Some("")), "G".to_owned());
+    }
 }
 #[cfg(target_os = "macos")]
-fn frontmost_window_owner() -> Option<String> {
+fn frontmost_window() -> Option<(String, Option<String>)> {
     use core_graphics::window::{
         kCGNullWindowID, kCGWindowListExcludeDesktopElements, kCGWindowListOptionOnScreenOnly,
     };
@@ -508,6 +549,8 @@ fn frontmost_window_owner() -> Option<String> {
             CFStringCreateWithCString(std::ptr::null(), b"kCGWindowLayer\0".as_ptr(), UTF8);
         let owner_key =
             CFStringCreateWithCString(std::ptr::null(), b"kCGWindowOwnerName\0".as_ptr(), UTF8);
+        let title_key =
+            CFStringCreateWithCString(std::ptr::null(), b"kCGWindowName\0".as_ptr(), UTF8);
         let mut found = None;
         for index in 0..CFArrayGetCount(array) {
             let window = CFArrayGetValueAtIndex(array, index);
@@ -521,12 +564,25 @@ fn frontmost_window_owner() -> Option<String> {
             }
             let owner = CFDictionaryGetValue(window, owner_key);
             if !owner.is_null() && CFGetTypeID(owner) == CFStringGetTypeID() {
-                found = cf_string_to_rust(owner);
-                break;
+                let title = CFDictionaryGetValue(window, title_key)
+                    .and_then(|title| {
+                        if !title.is_null() && CFGetTypeID(title) == CFStringGetTypeID() {
+                            Some(title)
+                        } else {
+                            None
+                        }
+                    })
+                    .map(cf_string_to_rust)
+                    .flatten();
+                if let Some(owner_name) = cf_string_to_rust(owner) {
+                    found = Some((owner_name, title));
+                    break;
+                }
             }
         }
         CFRelease(layer_key);
         CFRelease(owner_key);
+        CFRelease(title_key);
         CFRelease(array);
         found
     }
