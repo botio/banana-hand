@@ -436,7 +436,7 @@ mod named_pipe {
         Foundation::{CloseHandle, GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE},
         Storage::FileSystem::{
             CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_FLAG_FIRST_PIPE_INSTANCE, OPEN_EXISTING,
-            ReadFile, WriteFile,
+            PIPE_ACCESS_DUPLEX, ReadFile, WriteFile,
         },
         System::Pipes::{
             ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_MESSAGE, PIPE_TYPE_MESSAGE,
@@ -456,7 +456,9 @@ mod named_pipe {
     unsafe impl Send for PipeHandle {}
 
     pub(super) fn create_named_pipe(wide: &[u16], first: bool) -> Option<PipeHandle> {
-        let flags = (GENERIC_READ | GENERIC_WRITE)
+        // `dwOpenMode` takes PIPE_ACCESS_* access modes and FILE_FLAG_* flags,
+        // not the GENERIC_READ/GENERIC_WRITE access mask that CreateFileW uses.
+        let flags = PIPE_ACCESS_DUPLEX
             | if first {
                 FILE_FLAG_FIRST_PIPE_INSTANCE
             } else {
