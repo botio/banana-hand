@@ -37,6 +37,11 @@ Banana Hand 讓「一個快捷鍵」同時對兩個瀏覽器分頁做動作。�
 4. 按「載入未封裝的擴充功能」，選擇解壓後、含 `manifest.json` 的資料夾。
 5. 清單出現「Banana Hand Browser Bridge」即成功。
 
+**Chrome Web Store 提交（開發者）**
+- 執行 `npm run package-chromium-extension` 會另產生 `banana-hand-chrome-webstore-<版本>.zip`；Release 也附帶此檔，供商店上傳使用。
+- 商店包的 `manifest.json` 位於 ZIP 根目錄，且移除僅供開發版固定 ID 的 `key`。原本的 `banana-hand-chromium-<版本>.zip` 保留 `key`，只用於解壓後載入，不要上傳商店。
+- 商店項目的 ID 以開發者後台為準，不保證等於目前開發版 ID；正式發佈前須核對 Native Messaging allowlist 與商店實際 ID。
+
 **Firefox（AMO-signed，永久安裝）**
 1. 從同版本 Preview Release 下載 AMO-signed 的 `.xpi`。
 2. 地址列輸入 `about:addons`，點齒輪 →「從檔案安裝附加元件…」，選擇 `.xpi`。

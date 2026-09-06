@@ -1,7 +1,7 @@
-// Packages the Chromium extension source into a release asset. Users extract the
-// `.zip`, then select the extracted folder with Chrome's "Load unpacked" UI.
+// Produces a fixed-ID development ZIP and a separate Chrome Web Store upload ZIP.
+// The store manifest must be at the archive root and omit the development key.
 //
-// Output: dist/chromium-extension/banana-hand-chromium-<version>.zip
+// Outputs: dist/chromium-extension/banana-hand-{chromium,chrome-webstore}-<version>.zip
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdir, rm } from "node:fs/promises";
@@ -24,22 +24,32 @@ if (derivedExtensionId !== fixedExtensionId) {
 }
 const outDir = join(repoRoot, "dist", "chromium-extension");
 const out = join(outDir, `banana-hand-chromium-${version}.zip`);
+const storeOut = join(outDir, `banana-hand-chrome-webstore-${version}.zip`);
 
 await mkdir(outDir, { recursive: true });
 await rm(out, { force: true });
+await rm(storeOut, { force: true });
 
-// The archive root is the extension directory itself, so extracting it creates
-// a folder immediately usable by Chrome's "Load unpacked" flow.
+// Keep the development archive unchanged; transform only the store manifest.
 const py = `
-import os, sys, zipfile
-src, out, root = sys.argv[1], sys.argv[2], sys.argv[3]
-with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+import json, os, sys, zipfile
+src, out, store_out, root = sys.argv[1:]
+with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf, zipfile.ZipFile(store_out, "w", zipfile.ZIP_DEFLATED) as store:
     for current, _, files in os.walk(src):
         for filename in sorted(files):
             full = os.path.join(current, filename)
             relative = os.path.relpath(full, src)
             zf.write(full, os.path.join(root, relative))
+            if relative == "manifest.json":
+                with open(full, encoding="utf-8") as manifest_file:
+                    manifest = json.load(manifest_file)
+                manifest.pop("key", None)
+                store.writestr(relative, json.dumps(manifest, ensure_ascii=False, indent=2) + "\\n")
+            else:
+                store.write(full, relative)
 print("packed", out)
+print("packed", store_out)
 `;
-execFileSync("python3", ["-c", py, extDir, out, `banana-hand-chromium-${version}`], { stdio: "inherit" });
+execFileSync("python3", ["-c", py, extDir, out, storeOut, `banana-hand-chromium-${version}`], { stdio: "inherit" });
 console.log(`[package-chromium-extension] ${out}`);
+console.log(`[package-chromium-extension] ${storeOut}`);
