@@ -564,16 +564,13 @@ fn frontmost_window() -> Option<(String, Option<String>)> {
             }
             let owner = CFDictionaryGetValue(window, owner_key);
             if !owner.is_null() && CFGetTypeID(owner) == CFStringGetTypeID() {
-                let title = CFDictionaryGetValue(window, title_key)
-                    .and_then(|title| {
-                        if !title.is_null() && CFGetTypeID(title) == CFStringGetTypeID() {
-                            Some(title)
-                        } else {
-                            None
-                        }
-                    })
-                    .map(cf_string_to_rust)
-                    .flatten();
+                let title_ptr = CFDictionaryGetValue(window, title_key);
+                let title = if !title_ptr.is_null() && CFGetTypeID(title_ptr) == CFStringGetTypeID()
+                {
+                    cf_string_to_rust(title_ptr)
+                } else {
+                    None
+                };
                 if let Some(owner_name) = cf_string_to_rust(owner) {
                     found = Some((owner_name, title));
                     break;
