@@ -172,15 +172,11 @@ onDisconnect，因此握手拒絕分支必須主動清掉 port 並排程重連�
 避免 App 長時間未開時 setTimeout 隨背景頁卸載而消失。Firefox 斷線
 原因改讀正式 API 的 `port.error`，不再讀 Chrome 專用 lastError。
 
-### 2026-09-06：v0.1.7 實機回報——前景不是 browser（「目前前景：G」）
+### 2026-09-06：v0.1.7 回報與後續更正
 
-v0.1.7 上 Chrome／Firefox 都連上了，但發送皆被前景閘門拒絕，
-錯誤文字顯示「目前前景：G」（使用者的終端機／聊天程序，單字
-owner name）。機制：使用者在 browser 之外的 App 中操作 Banana
-Hand，而 WebExtension 的 `windows.update({ focused: true })` 只
-能在該 browser 已是前景 App 時生效——browser 停留在背景，閘門
-按設計 fail-closed（閘門本身沒壞，錯誤文字也第一次顯示了真正
-原因）。
+Chrome／Firefox 連線正常，但發送被拒且顯示「目前前景：G」。
+先前認定 G 是終端機／聊天程序，並把問題歸因於 browser 無法
+啟用背景 App，沒有證據；該診斷已由下方 v0.1.10 重現推翻。
 
 修正（ADR 0004，v0.1.8）：macOS `InputAdapter::activate` 在
 in-browser 啟用／聚焦與閘門之前，用 `ps -eo command` 挑出正在
@@ -192,19 +188,12 @@ in-browser 啟用／聚焦與閘門之前，用 `ps -eo command` 挑出正在
 目標 tab 若在另一 channel 可能送到同系錯誤 window——preview
 階段限制。Windows `activate` 為 no-op（未回報問題前不加 FFI）。
 
-仍待：使用者 Mac 實機確認（快捷鍵實際送達、`G` 的實際程序
-名稱）。
+後續驗證與根因見下方 v0.1.10 紀錄；不再要求使用者辨識「G」程序。
 
-### 2026-09-06：v0.1.8 回報——前景仍是 G，使用者無法辨識
+### 2026-09-06：持續顯示 G 的回報與後續更正
 
-使用者回報：更新後發送仍被拒（「目前前景：G」），且不知道自己
-無法辨識 G 是哪個 App（v0.1.8 的 `open -a` 不自我驗證，成功
-回 Ok 後由閘門看到 G）。
-
-分析：`open -a` 對已執行的 App 通常 exit 0，但若目標視窗位於
-其他 macOS Space／全螢幕空間，視窗不會出現在**目前桌面**的
-on-screen 清單，閘門（讀目前可見視窗）自然看不到 browser。
-也可能使用者還在 v0.1.7（無激活步驟）。
+使用者無法辨識 G。當時推測視窗位於其他 Space，或測試版本不符，
+均未證實；使用者已明確確認測試 v0.1.9 且畫面有跳到目標分頁。
 
 修正（ADR 0005，v0.1.9）：`activate_macos` 在 `open -a` 後做
 有界自我驗證（2 輪 × 8 × 150ms，未成為前景再 open 一次），
@@ -212,4 +201,19 @@ on-screen 清單，閘門（讀目前可見視窗）自然看不到 browser。
 可能在其他桌面」；前景閘門的失敗訊息也加入 `kCGWindowName`
 視窗標題，裸 owner（如 G）變得可辨認。
 
-仍待：v0.1.9 的標題輸出確認 G 的實際 App；Mac 實機快捷鍵送達。
+後續根因與驗證見下方；標題顯示不能修正底層字串截斷。
+
+### 2026-09-06：v0.1.10——重現字串截斷與 Firefox 路徑誤判
+
+- `CFStringGetCString` 回傳 `Boolean`（u8）成功值，不是長度。
+  舊程式宣告為 u32 並切 `buffer[..written]`；成功回傳 1 時，
+  `Google Chrome` 變成 `G`，無論視窗是否已經在前景都會比對失敗。
+  改用已量測的 UTF-8 位元組數，並校正同段 CoreFoundation ABI。
+- Firefox 的 bundle 是 `Firefox.app`，主程式為小寫 `firefox`；
+  舊碼假定名稱相同，故已執行仍回報「未執行」。現在分別比對，
+  使用不截斷的完整 executable 路徑並拒絕 helper 前綴命中。
+- 本機以實際函式加 CF ABI 替身重現 `Some("G")` 與 Firefox None，
+  修正後兩者皆通過；macOS CI 增加真正 CFString 的完整名稱、
+  Unicode 標題測試。替身測試不是 macOS 實機輸入測試。
+- 不新增搶焦點重試；移除未經證實的 Space 提示。快捷鍵實際送達
+  仍待使用者 Mac 確認，不再把 CI 綠燈等同於實機送達。

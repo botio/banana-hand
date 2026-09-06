@@ -355,10 +355,9 @@ fn expected_owners(browser: &BrowserKind) -> &[&str] {
     }
 }
 
-/// A bare owner name like "G" means nothing to the user; the window title
-/// identifies the application. Pure so it is testable on every platform.
-#[cfg(any(target_os = "macos", test))]
-pub(crate) fn describe_frontmost(owner: &str, title: Option<&str>) -> String {
+/// Include a title when macOS makes it available; owner names remain complete.
+#[cfg(target_os = "macos")]
+fn describe_frontmost(owner: &str, title: Option<&str>) -> String {
     match title {
         Some(title) if !title.is_empty() => format!("{owner}「{title}」"),
         _ => owner.to_owned(),
@@ -393,7 +392,7 @@ fn activate_macos(browser: &BrowserKind) -> Result<(), InputError> {
         BrowserKind::Firefox => "Firefox",
     };
     let listing = std::process::Command::new("ps")
-        .args(["-eo", "command"])
+        .args(["-ww", "-axo", "comm="])
         .output()
         .map_err(|error| InputError::BrowserActivationFailed {
             name: display.to_owned(),
@@ -436,26 +435,26 @@ fn activate_macos(browser: &BrowserKind) -> Result<(), InputError> {
     Err(InputError::BrowserActivationFailed {
         name: app.to_owned(),
         detail: format!(
-            "open -a 成功，但 browser 視窗未成為前景（目前前景：{}）；可能位於其他桌面（Space）或全螢幕空間",
+            "open -a 成功，但尚未驗證到 browser 前景視窗（目前前景：{}）",
             describe_frontmost(&owner, title.as_deref())
         ),
     })
 }
 
-/// The first candidate whose app bundle path appears in a `ps -eo command`
-/// listing. Pure so the matching is testable on every platform; the
-/// macOS-only caller performs the listing and the `open -a` itself.
+/// Match complete executable paths from `ps -ww -axo comm=`, not command
+/// arguments or helper-process prefixes. Bundle and executable names differ.
 #[cfg(any(target_os = "macos", test))]
 pub(crate) fn pick_running_candidate<'a>(candidates: &[&'a str], listing: &str) -> Option<&'a str> {
-    candidates
-        .iter()
-        .copied()
-        .find(|name| listing.contains(&format!("{name}.app/Contents/MacOS/{name}")))
+    candidates.iter().copied().find(|name| {
+        let executable = if *name == "Firefox" { "firefox" } else { name };
+        let suffix = format!("/{name}.app/Contents/MacOS/{executable}");
+        listing.lines().any(|line| line.trim().ends_with(&suffix))
+    })
 }
 
 #[cfg(test)]
 mod activation_tests {
-    use super::{describe_frontmost, pick_running_candidate};
+    use super::pick_running_candidate;
 
     const CHROME_CANDIDATES: &[&str] = &[
         "Google Chrome",
@@ -487,25 +486,33 @@ mod activation_tests {
     }
 
     #[test]
-    fn nothing_running_is_none() {
+    fn firefox_bundle_uses_lowercase_executable() {
         assert_eq!(
-            pick_running_candidate(CHROME_CANDIDATES, "/usr/bin/zsh\n"),
+            pick_running_candidate(
+                &["Firefox"],
+                "/Applications/Firefox.app/Contents/MacOS/firefox\n"
+            ),
+            Some("Firefox")
+        );
+    }
+
+    #[test]
+    fn helper_process_does_not_prove_browser_is_running() {
+        assert_eq!(
+            pick_running_candidate(
+                &["Firefox"],
+                "/Applications/Firefox.app/Contents/MacOS/firefox-helper\n"
+            ),
             None
         );
     }
 
     #[test]
-    fn describe_frontmost_includes_the_window_title() {
+    fn nothing_running_is_none() {
         assert_eq!(
-            describe_frontmost("G", Some("zsh — bash")),
-            "G「zsh — bash」".to_owned()
+            pick_running_candidate(CHROME_CANDIDATES, "/usr/bin/zsh\n"),
+            None
         );
-    }
-
-    #[test]
-    fn describe_frontmost_falls_back_to_the_owner_name() {
-        assert_eq!(describe_frontmost("G", None), "G".to_owned());
-        assert_eq!(describe_frontmost("G", Some("")), "G".to_owned());
     }
 }
 #[cfg(target_os = "macos")]
@@ -527,10 +534,10 @@ fn frontmost_window() -> Option<(String, Option<String>)> {
             string: *const u8,
             encoding: u32,
         ) -> *const c_void;
-        fn CFNumberGetValue(number: *const c_void, number_type: u32, value: *mut i64) -> bool;
-        fn CFGetTypeID(value: *const c_void) -> u32;
-        fn CFNumberGetTypeID() -> u32;
-        fn CFStringGetTypeID() -> u32;
+        fn CFNumberGetValue(number: *const c_void, number_type: u32, value: *mut i64) -> u8;
+        fn CFGetTypeID(value: *const c_void) -> usize;
+        fn CFNumberGetTypeID() -> usize;
+        fn CFStringGetTypeID() -> usize;
         fn CFRelease(value: *const c_void);
     }
 
@@ -559,7 +566,7 @@ fn frontmost_window() -> Option<(String, Option<String>)> {
                 continue;
             }
             let mut layer_value: i64 = -1;
-            if !CFNumberGetValue(layer, SINT64, &mut layer_value) || layer_value != 0 {
+            if CFNumberGetValue(layer, SINT64, &mut layer_value) == 0 || layer_value != 0 {
                 continue;
             }
             let owner = CFDictionaryGetValue(window, owner_key);
@@ -595,12 +602,12 @@ fn cf_string_to_rust(value: *const std::ffi::c_void) -> Option<String> {
             buffer: *mut u8,
             size: isize,
             encoding: u32,
-        ) -> u32;
+        ) -> u8;
         fn CFStringGetBytes(
             string: *const std::ffi::c_void,
             range: CFRange,
             encoding: u32,
-            loss_byte: u16,
+            loss_byte: u8,
             external: u8,
             buffer: *mut u8,
             max_len: isize,
@@ -622,9 +629,7 @@ fn cf_string_to_rust(value: *const std::ffi::c_void) -> Option<String> {
         if length <= 0 {
             return None;
         }
-        // Measure the exact UTF-8 byte length first (null buffer, zero max):
-        // sizing by UTF-16 units would under-allocate for multi-byte owners
-        // (e.g. CJK app names) and let CFStringGetCString overflow.
+        // Measure UTF-8 bytes, not UTF-16 units, before allocating.
         let mut used: isize = 0;
         let range = CFRange {
             location: 0,
@@ -636,11 +641,42 @@ fn cf_string_to_rust(value: *const std::ffi::c_void) -> Option<String> {
             return None;
         }
         let mut buffer = vec![0u8; used as usize + 1];
-        let written = CFStringGetCString(value, buffer.as_mut_ptr(), (used + 1) as isize, UTF8);
-        if written == 0 {
+        let success = CFStringGetCString(value, buffer.as_mut_ptr(), used + 1, UTF8);
+        if success == 0 {
             return None;
         }
-        Some(String::from_utf8_lossy(&buffer[..written as usize]).into_owned())
+        // CFStringGetCString returns Boolean success, not bytes written.
+        buffer.truncate(used as usize);
+        String::from_utf8(buffer).ok()
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod macos_string_tests {
+    use super::cf_string_to_rust;
+    use std::ffi::{CString, c_void};
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    unsafe extern "C" {
+        fn CFStringCreateWithCString(
+            allocator: *const c_void,
+            bytes: *const std::ffi::c_char,
+            encoding: u32,
+        ) -> *const c_void;
+        fn CFRelease(value: *const c_void);
+    }
+
+    #[test]
+    fn foreground_names_and_unicode_titles_are_not_truncated() {
+        for text in ["Google Chrome", "Firefox", "瀏覽器 🦊 — 分頁標題"] {
+            let bytes = CString::new(text).unwrap();
+            let value =
+                unsafe { CFStringCreateWithCString(std::ptr::null(), bytes.as_ptr(), 0x0800_0100) };
+            assert!(!value.is_null());
+            let actual = cf_string_to_rust(value);
+            unsafe { CFRelease(value) };
+            assert_eq!(actual.as_deref(), Some(text));
+        }
     }
 }
 

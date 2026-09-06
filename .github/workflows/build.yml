@@ -98,6 +98,10 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ matrix.macos_signing_identity }}
         run: npm run tauri -- build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
 
+      - name: Verify macOS foreground conversion with CoreFoundation
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: cargo test -p banana-hand --target ${{ matrix.target }} 'input::'
+
       - name: Verify macOS app signature inside the DMG
         if: matrix.target == 'aarch64-apple-darwin'
         run: |
