@@ -21,7 +21,7 @@ Banana Hand 讓「一個快捷鍵」同時對兩個瀏覽器分頁做動作。�
 ### 第 1 步：安裝桌面 App
 從最新的 [GitHub Preview Release](https://github.com/botio/banana-hand/releases) 下載符合
 作業系統的 desktop asset：
-- **Windows**：執行 NSIS `.exe` 安裝程式。
+- **Windows**：執行 NSIS `.exe` 安裝程式。安裝程式內含 WebView2 Runtime（offline installer），離線也能安裝並首次執行，無需另裝或連網下載。
 - **macOS（僅 Apple Silicon）**：下載檔名含 `_aarch64.dmg` 的 Preview asset，把 `Banana Hand.app` 拖到「應用程式」。DMG 是 ad-hoc 簽章（無 Apple Developer ID、未 notarize），首次開啟會被 Gatekeeper 擋成「應用程式已損毀，無法開啟」；把 app 拖進 /Applications 後，在「終端機」清除一次隔離屬性即可正常開啟：`xattr -dr com.apple.quarantine "/Applications/Banana Hand.app"`（可能被要求允許 Terminal 變更）。ad-hoc／自簽簽章在近幾版 macOS 上無法產生「仍要開啟／Open Anyway」流程；若要移除這一次性的步驟需要 Apple Developer ID（$99/年），我們正在評估。
 - **Linux**：安裝 `.deb`（或使用 AppImage）。
 
