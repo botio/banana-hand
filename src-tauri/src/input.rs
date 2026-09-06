@@ -263,50 +263,13 @@ fn windows_key(key: &Key) -> u16 {
 
 #[cfg(target_os = "macos")]
 fn send_macos(chord: &ShortcutChord) -> Result<(), InputError> {
-    use std::ffi::c_void;
-
     use core_graphics::{
         event::{CGEvent, CGEventFlags, CGEventTapLocation},
         event_source::{CGEventSource, CGEventSourceStateID},
     };
 
-    #[link(name = "ApplicationServices", kind = "framework")]
-    #[link(name = "CoreFoundation", kind = "framework")]
-    unsafe extern "C" {
-        fn AXIsProcessTrustedWithOptions(options: *const c_void) -> bool;
-        static kCFBooleanTrue: *const c_void;
-        fn CFStringCreateWithCString(
-            alloc: *const c_void,
-            string: *const u8,
-            encoding: u32,
-        ) -> *const c_void;
-        fn CFDictionaryCreate(
-            alloc: *const c_void,
-            keys: *const *const c_void,
-            values: *const *const c_void,
-            count: isize,
-        ) -> *const c_void;
-        fn CFRelease(value: *const c_void);
-    }
-    // The options variant pops the system dialog (with a deep link into
-    // System Settings) when the grant is missing, instead of failing with a
-    // message the user has to translate into settings clicks.
-    unsafe {
-        let key = CFStringCreateWithCString(
-            std::ptr::null(),
-            b"kAXTrustedCheckOptionPrompt\0".as_ptr(),
-            0x0800_0100,
-        );
-        let prompt: *const c_void = kCFBooleanTrue;
-        let keys = [key];
-        let values = [prompt];
-        let options = CFDictionaryCreate(std::ptr::null(), keys.as_ptr(), values.as_ptr(), 1);
-        let trusted = AXIsProcessTrustedWithOptions(options);
-        CFRelease(options);
-        CFRelease(key);
-        if !trusted {
-            return Err(InputError::AccessibilityPermissionRequired);
-        }
+    if !macos_accessibility_trusted(true) {
+        return Err(InputError::AccessibilityPermissionRequired);
     }
     let flags = chord
         .modifiers
@@ -340,6 +303,42 @@ fn send_macos(chord: &ShortcutChord) -> Result<(), InputError> {
     up.set_flags(flags);
     up.post(CGEventTapLocation::HID);
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn macos_accessibility_trusted(prompt: bool) -> bool {
+    use core_foundation::{
+        base::{Boolean, TCFType},
+        boolean::CFBoolean,
+        dictionary::{
+            CFDictionary, CFDictionaryCreate, CFDictionaryRef, kCFTypeDictionaryKeyCallBacks,
+            kCFTypeDictionaryValueCallBacks,
+        },
+        string::{CFString, CFStringRef},
+    };
+
+    #[link(name = "ApplicationServices", kind = "framework")]
+    unsafe extern "C" {
+        fn AXIsProcessTrustedWithOptions(options: CFDictionaryRef) -> Boolean;
+        static kAXTrustedCheckOptionPrompt: CFStringRef;
+    }
+
+    let prompt = CFBoolean::from(prompt);
+    let keys = [unsafe { kAXTrustedCheckOptionPrompt }.cast()];
+    let values = [prompt.as_CFTypeRef()];
+    // Use the crate's six-argument declaration and retain/release callbacks.
+    // Stack arrays avoid allocating temporary key/value vectors.
+    let options: CFDictionary<CFString, CFBoolean> = unsafe {
+        CFDictionary::wrap_under_create_rule(CFDictionaryCreate(
+            std::ptr::null(),
+            keys.as_ptr(),
+            values.as_ptr(),
+            1,
+            &kCFTypeDictionaryKeyCallBacks,
+            &kCFTypeDictionaryValueCallBacks,
+        ))
+    };
+    unsafe { AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef()) != 0 }
 }
 
 #[cfg(target_os = "macos")]
@@ -677,6 +676,21 @@ mod macos_string_tests {
             unsafe { CFRelease(value) };
             assert_eq!(actual.as_deref(), Some(text));
         }
+    }
+
+    #[test]
+    fn accessibility_options_query_matches_nonprompting_system_query() {
+        use core_foundation::base::Boolean;
+
+        #[link(name = "ApplicationServices", kind = "framework")]
+        unsafe extern "C" {
+            fn AXIsProcessTrusted() -> Boolean;
+        }
+
+        // Exercise the production dictionary and AX call without opening
+        // a permission dialog or injecting keyboard events on the CI runner.
+        let expected = unsafe { AXIsProcessTrusted() != 0 };
+        assert_eq!(super::macos_accessibility_trusted(false), expected);
     }
 }
 

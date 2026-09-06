@@ -217,3 +217,21 @@ in-browser 啟用／聚焦與閘門之前，用 `ps -eo command` 挑出正在
   Unicode 標題測試。替身測試不是 macOS 實機輸入測試。
 - 不新增搶焦點重試；移除未經證實的 Space 提示。快捷鍵實際送達
   仍待使用者 Mac 確認，不再把 CI 綠燈等同於實機送達。
+
+### 2026-09-06：發送時 App 崩潰——Accessibility 字典 ABI 缺參數
+
+使用者回報按發送後顯示「Banana Hand quit unexpectedly」。
+尚未取得該次 macOS crash report，不宣稱已定位使用者的崩潰堆疊。
+
+程式查核發現確定的原生邊界錯誤：`send_macos` 將
+`CFDictionaryCreate` 宣告成 4 個參數，但正式 API 為 6 個參數，
+遺漏 key／value callbacks，可能使 CoreFoundation 讀取未指定
+指標。用正式 binding 型別檢查原呼叫，得到 E0061（6 個參數卻
+只傳 4 個）；此為 ABI 缺陷證據，不是使用者 crash report。
+
+v0.1.11 改用 `core-foundation` 正式宣告、CFType retain/release
+callbacks 與 RAII 字典，並使用系統的 `kAXTrustedCheckOptionPrompt`
+常數及 Boolean 型別；不再手寫該字典 API，也不硬編碼 prompt key。
+macOS CI 新增實際 production 權限查詢（不彈提示、不注入按鍵），
+與系統無參數信任查詢結果比對；本機可完整型別檢查修正後 helper。
+使用者實機送達與本次 crash stack 仍須分開確認。

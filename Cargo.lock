@@ -87,6 +87,7 @@ name = "banana-hand"
 version = "0.1.10"
 dependencies = [
  "banana-hand-protocol",
+ "core-foundation",
  "core-graphics",
  "parking_lot",
  "rand",
