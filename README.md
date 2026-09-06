@@ -1,18 +1,31 @@
+<img src="src-tauri/icons/icon.png" alt="Banana Hand app icon" width="128" height="128">
+
 # Banana Hand
 
 以 Tauri 2 + Rust 建立的桌面發送協調器。使用者在每次 App 啟動後，從已連線的 Chrome 或 Firefox WebExtension 選出兩個不同的 Browser Tab，再將快捷鍵庫中選定的單一組合按鍵依序做盡力原生發送。
 
 ## 下載與 Preview Release
 
-每個推送的 `v*` tag 都會由 GitHub Actions 建立一個
-[GitHub Preview Release](https://github.com/botio/banana-hand/releases)：內含 Windows
-NSIS、macOS 未簽署 DMG、Linux `.deb`／AppImage，以及 Chrome extension 的 `.zip` 和
-Firefox extension 的 `.xpi`。這些是可下載、可驗證的打包產物；**Preview 不表示任何
+從 [GitHub Preview Releases](https://github.com/botio/banana-hand/releases) 下載桌面 App 與瀏覽器插件。
+桌面安裝檔提供 Windows x64 NSIS、macOS Apple Silicon ad-hoc 簽署 DMG、
+Linux x64 `.deb`／AppImage。**Preview 不表示任何
 平台／browser 配對已得到正式支援宣稱**。正式支援前仍須完成
 [ADR 0003 的 24-cell 實機發布證據矩陣](docs/adr/0003-release-evidence-matrix.md)。
 
 Firefox 發布流程透過 AMO unlisted signing 產生可供標準 Firefox 安裝的 `.xpi`；
 簽章失敗會中止發布。AMO 簽章不代表上架 AMO 搜尋目錄，暫用 ZIP 則供開發除錯。
+
+### 瀏覽器插件：該下載哪一份？
+
+| 檔案 | 用途 | 安裝／提交方式 |
+| --- | --- | --- |
+| `banana-hand-chromium-<版本>.zip` | Chrome 本機開發版，保留固定 ID | 解壓後，在 `chrome://extensions` 載入未封裝項目 |
+| `banana-hand-chrome-webstore-<版本>.zip` | Chrome Web Store 提交包，不含 `key` | 開發者上傳商店送審；不是一般使用者安裝包 |
+| `banana-hand-firefox-<版本>-signed.xpi` | Firefox 已經 AMO 簽署的永久安裝版 | 在 `about:addons` 從檔案安裝 |
+| `banana-hand-firefox-temporary-<版本>.zip` | Firefox 開發除錯用暫用版 | 解壓後，在 `about:debugging` 載入；重啟後須重新載入 |
+
+一般 Firefox 使用者請選 **`-signed.xpi`**。Chrome 商店提交包與本機開發版不可混用；
+產生提交包不代表已通過商店審核。
 
 ## 使用說明（給一般使用者）
 
@@ -21,29 +34,23 @@ Banana Hand 讓「一個快捷鍵」同時對兩個瀏覽器分頁做動作。�
 ### 第 1 步：安裝桌面 App
 從最新的 [GitHub Preview Release](https://github.com/botio/banana-hand/releases) 下載符合
 作業系統的 desktop asset：
-- **Windows**：執行 NSIS `.exe` 安裝程式。安裝程式內含 WebView2 Runtime（offline installer），離線也能安裝並首次執行，無需另裝或連網下載。
-- **macOS（僅 Apple Silicon）**：下載檔名含 `_aarch64.dmg` 的 Preview asset，把 `Banana Hand.app` 拖到「應用程式」。DMG 是 ad-hoc 簽章（無 Apple Developer ID、未 notarize），首次開啟會被 Gatekeeper 擋成「應用程式已損毀，無法開啟」；把 app 拖進 /Applications 後，在「終端機」清除一次隔離屬性即可正常開啟：`xattr -dr com.apple.quarantine "/Applications/Banana Hand.app"`（可能被要求允許 Terminal 變更）。ad-hoc／自簽簽章在近幾版 macOS 上無法產生「仍要開啟／Open Anyway」流程；若要移除這一次性的步驟需要 Apple Developer ID（$99/年），我們正在評估。
+- **Windows**：執行 NSIS `.exe` 安裝程式。內含 WebView2 Runtime 離線安裝程式，無需另行下載 Runtime。
+- **macOS（僅 Apple Silicon）**：下載 `_aarch64.dmg`，把 `Banana Hand.app` 拖到「應用程式」。App 為 ad-hoc 簽署，沒有 Apple Developer ID／notarization。若 Gatekeeper 擋下開啟，先確認下載來源，再於終端機執行 `xattr -dr com.apple.quarantine "/Applications/Banana Hand.app"` 清除隔離屬性。
 - **Linux**：安裝 `.deb`（或使用 AppImage）。
 
-> App 靠「瀏覽器插件」看得到你的分頁。Preview Release 附帶 Chrome 的
-> `banana-hand-chromium-<版本>.zip`，以及可在標準 Firefox 暫時載入的
-> `banana-hand-firefox-temporary-<版本>.zip`。一般 Firefox 使用者請下載
-> release 中 AMO-signed 的 `.xpi`，不需要暫時載入或停用簽章檢查。
+### 第 2 步：安裝瀏覽器插件
 
-**Chrome**
+桌面 App 靠插件取得 Browser Tab；請依上方表格下載對應用途的檔案。
+
+**Chrome（本機開發版）**
 1. 從同版本 Preview Release 下載 `banana-hand-chromium-<版本>.zip` 並解壓。
 2. 地址列輸入 `chrome://extensions`，按 Enter。
 3. 右上角把「開發者模式」打開。
 4. 按「載入未封裝的擴充功能」，選擇解壓後、含 `manifest.json` 的資料夾。
 5. 清單出現「Banana Hand Browser Bridge」即成功。
 
-**Chrome Web Store 提交（開發者）**
-- 執行 `npm run package-chromium-extension` 會另產生 `banana-hand-chrome-webstore-<版本>.zip`；Release 也附帶此檔，供商店上傳使用。
-- 商店包的 `manifest.json` 位於 ZIP 根目錄，且移除僅供開發版固定 ID 的 `key`。原本的 `banana-hand-chromium-<版本>.zip` 保留 `key`，只用於解壓後載入，不要上傳商店。
-- 商店項目的 ID 以開發者後台為準，不保證等於目前開發版 ID；正式發佈前須核對 Native Messaging allowlist 與商店實際 ID。
-
 **Firefox（AMO-signed，永久安裝）**
-1. 從同版本 Preview Release 下載 AMO-signed 的 `.xpi`。
+1. 從同版本 Preview Release 下載 `banana-hand-firefox-<版本>-signed.xpi`。
 2. 地址列輸入 `about:addons`，點齒輪 →「從檔案安裝附加元件…」，選擇 `.xpi`。
 3. 確認安裝及權限提示。重新啟動 Firefox 後仍會保留。
 4. 此 unlisted 發布尚未設定自動更新來源；新版本需下載新的已簽署 `.xpi` 安裝更新。
@@ -135,6 +142,12 @@ cargo build -p banana-hand-native-host
 - Chromium MV3 source：`extensions/chromium/`。Chrome 使用；正式版從 Chrome Web Store 安裝。
 - Firefox MV3 source：`extensions/firefox/`。使用非持續性背景事件頁（`background.scripts`），不是 Firefox 尚未支援的 extension service worker。固定 Gecko Add-on ID 是 `bridge@banana-hand.dev`；發布須由 AMO 簽署。
 - desktop installer 應安裝 host binary 與各 browser 的 native messaging manifest，但不得旁載 extension。
+
+**Chrome Web Store 提交（開發者）**
+- 執行 `npm run package-chromium-extension` 會另產生 `banana-hand-chrome-webstore-<版本>.zip`；Release 也附帶此檔，供商店上傳使用。
+- 商店包的 `manifest.json` 位於 ZIP 根目錄，且移除僅供開發版固定 ID 的 `key`。原本的 `banana-hand-chromium-<版本>.zip` 保留 `key`，只用於解壓後載入，不要上傳商店。
+- 商店項目的 ID 以開發者後台為準，不保證等於目前開發版 ID；正式發佈前須核對 Native Messaging allowlist 與商店實際 ID。
+
 
 App 啟動時的自動登錄（`native_host::auto_register`）會把同一份 manifest 寫入所有已知通道：
 macOS 為 `~/Library/Application Support/Google/Chrome{, Beta, Canary}/NativeMessagingHosts/`、
