@@ -63,6 +63,14 @@ function Assert-AppAlive {
     }
 }
 
+function Test-HostRegistryKey {
+    param([string]$KeyPath)
+    $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($KeyPath)
+    if ($null -eq $key) { return $false }
+    $key.Dispose()
+    return $true
+}
+
 try {
     Add-Type -TypeDefinition @'
 using System;
@@ -150,6 +158,23 @@ public static class StartupWindow {
         @{ Browser = 'firefox'; Key = "Software\Mozilla\NativeMessagingHosts\$hostName" }
     )
     $manifestPaths = [Collections.Generic.List[string]]::new()
+
+    # Tauri runs the setup hook (bridge + native-host registration) after the
+    # window is already shown, so poll for the keys instead of asserting once.
+    $registryDeadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
+    $chromeReady = $false
+    $firefoxReady = $false
+    do {
+        $chromeReady = Test-HostRegistryKey $registrations[0].Key
+        $firefoxReady = Test-HostRegistryKey $registrations[1].Key
+        if ($chromeReady -and $firefoxReady) { break }
+        Assert-AppAlive $desktop
+        Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $registryDeadline)
+    if (-not ($chromeReady -and $firefoxReady)) {
+        throw "Browser registry keys did not appear within $StartupTimeoutSeconds seconds (chrome present: $chromeReady; firefox present: $firefoxReady)."
+    }
+
     foreach ($registration in $registrations) {
         Assert-AppAlive $desktop
         $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($registration.Key)
