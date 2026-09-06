@@ -9,7 +9,7 @@
     "48": "icons/icon-48.png",
     "128": "icons/icon-128.png"
   },
-  "permissions": ["tabs", "storage", "nativeMessaging"],
+  "permissions": ["tabs", "storage", "nativeMessaging", "alarms"],
   "browser_specific_settings": {
     "gecko": {
       "id": "bridge@banana-hand.dev",

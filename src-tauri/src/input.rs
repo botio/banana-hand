@@ -17,9 +17,7 @@ pub(crate) enum InputError {
     #[error("Windows SendInput 未接受完整快捷鍵事件串流")]
     WindowsInjectionFailed,
     #[error("目標視窗沒有成為前景（目前前景：{actual}）；發送已拒絕，請再試一次")]
-    ForegroundNotTarget {
-        actual: String,
-    },
+    ForegroundNotTarget { actual: String },
     #[error("X11 display 無法開啟")]
     X11DisplayUnavailable,
     #[error("X11 server 未提供 XTEST extension")]
@@ -361,6 +359,9 @@ fn verify_macos_foreground(browser: &BrowserKind) -> Result<(), InputError> {
 
 #[cfg(target_os = "macos")]
 fn frontmost_window_owner() -> Option<String> {
+    use core_graphics::window::{
+        kCGNullWindowID, kCGWindowListExcludeDesktopElements, kCGWindowListOptionOnScreenOnly,
+    };
     use std::ffi::c_void;
 
     #[link(name = "CoreFoundation", kind = "framework")]
@@ -384,11 +385,12 @@ fn frontmost_window_owner() -> Option<String> {
 
     const UTF8: u32 = 0x0800_0100;
     const SINT64: u32 = 4; // kCFNumberSInt64Type (NOT 6: that is Float64)
-    const ON_SCREEN: u32 = 1; // kCGWindowListOptionOnScreenOnly
-    const EXCLUDE_DESKTOP: u32 = 2; // kCGWindowListExcludeDesktopElements
 
     unsafe {
-        let array = CGWindowListCopyWindowInfo(ON_SCREEN | EXCLUDE_DESKTOP, 0);
+        let array = CGWindowListCopyWindowInfo(
+            kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+            kCGNullWindowID,
+        );
         if array.is_null() {
             return None;
         }
@@ -471,8 +473,7 @@ fn cf_string_to_rust(value: *const std::ffi::c_void) -> Option<String> {
             return None;
         }
         let mut buffer = vec![0u8; used as usize + 1];
-        let written =
-            CFStringGetCString(value, buffer.as_mut_ptr(), (used + 1) as isize, UTF8);
+        let written = CFStringGetCString(value, buffer.as_mut_ptr(), (used + 1) as isize, UTF8);
         if written == 0 {
             return None;
         }
@@ -488,10 +489,7 @@ fn verify_windows_foreground(browser: &BrowserKind) -> Result<(), InputError> {
     };
     for _ in 0..20 {
         if let Some(owner) = foreground_process_name() {
-            if expected
-                .iter()
-                .any(|name| owner.eq_ignore_ascii_case(name))
-            {
+            if expected.iter().any(|name| owner.eq_ignore_ascii_case(name)) {
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 return Ok(());
             }
@@ -524,17 +522,13 @@ fn foreground_process_name() -> Option<String> {
     if process_id == 0 {
         return None;
     }
-    let handle = unsafe {
-        OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id)
-    };
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
     if handle.is_null() {
         return None;
     }
     let mut buffer = [0u16; 261];
     let mut size: u32 = buffer.len() as u32;
-    let written = unsafe {
-        QueryFullProcessImageNameW(handle, 0, buffer.as_mut_ptr(), &mut size)
-    };
+    let written = unsafe { QueryFullProcessImageNameW(handle, 0, buffer.as_mut_ptr(), &mut size) };
     let name = if written == 0 {
         None
     } else {

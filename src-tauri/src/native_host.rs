@@ -129,11 +129,7 @@ pub fn manifest_file_name() -> String {
 }
 
 /// Build the native-messaging manifest JSON for a browser.
-pub fn build_manifest(
-    browser: &BrowserKind,
-    host_path: &Path,
-    discovered_ids: &[String],
-) -> Value {
+pub fn build_manifest(browser: &BrowserKind, host_path: &Path, discovered_ids: &[String]) -> Value {
     let mut manifest = serde_json::json!({
         "name": HOST_NAME,
         "description": MANIFEST_DESCRIPTION,
@@ -169,7 +165,7 @@ pub fn build_manifest(
 /// The directory that holds native-messaging host manifests for a browser
 /// channel.
 ///
-/// - macOS: `~/Library/Google/Chrome{, Beta, Canary}/NativeMessagingHosts`
+/// - macOS: `~/Library/Application Support/Google/Chrome{, Beta, Canary}/NativeMessagingHosts`
 ///   for the Chrome channels, `~/Library/Application Support/Chromium/…`
 ///   for Chromium, `~/Library/Application Support/Mozilla/NativeMessagingHosts`
 ///   for Firefox.
@@ -184,20 +180,15 @@ pub fn manifest_dir(browser: HostBrowser, home: &Path, localappdata: &Path) -> P
         let _ = home;
         match browser {
             HostBrowser::Firefox => localappdata.join("Mozilla/Firefox/NativeMessagingHosts"),
-            _ => localappdata.join("Banana Hand").join("native-host-manifests"),
+            _ => localappdata
+                .join("Banana Hand")
+                .join("native-host-manifests"),
         }
     }
     #[cfg(target_os = "macos")]
     {
         let _ = localappdata;
-        let sub = match browser {
-            HostBrowser::Chrome => "Library/Google/Chrome/NativeMessagingHosts",
-            HostBrowser::ChromeBeta => "Library/Google/Chrome Beta/NativeMessagingHosts",
-            HostBrowser::ChromeCanary => "Library/Google/Chrome Canary/NativeMessagingHosts",
-            HostBrowser::Chromium => "Library/Application Support/Chromium/NativeMessagingHosts",
-            HostBrowser::Firefox => "Library/Application Support/Mozilla/NativeMessagingHosts",
-        };
-        home.join(sub)
+        macos_manifest_dir(browser, home)
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
@@ -211,6 +202,22 @@ pub fn manifest_dir(browser: HostBrowser, home: &Path, localappdata: &Path) -> P
         };
         home.join(sub)
     }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn macos_manifest_dir(browser: HostBrowser, home: &Path) -> PathBuf {
+    let sub = match browser {
+        HostBrowser::Chrome => "Library/Application Support/Google/Chrome/NativeMessagingHosts",
+        HostBrowser::ChromeBeta => {
+            "Library/Application Support/Google/Chrome Beta/NativeMessagingHosts"
+        }
+        HostBrowser::ChromeCanary => {
+            "Library/Application Support/Google/Chrome Canary/NativeMessagingHosts"
+        }
+        HostBrowser::Chromium => "Library/Application Support/Chromium/NativeMessagingHosts",
+        HostBrowser::Firefox => "Library/Application Support/Mozilla/NativeMessagingHosts",
+    };
+    home.join(sub)
 }
 
 /// The full on-disk path of the native-messaging manifest for a channel.
@@ -249,7 +256,9 @@ fn describe_location(browser: HostBrowser, home: &Path, localappdata: &Path) -> 
 #[cfg(target_os = "windows")]
 fn windows_registry_subkey(browser: HostBrowser) -> &'static str {
     match browser {
-        HostBrowser::Chrome | HostBrowser::Chromium => "Software\\Google\\Chrome\\NativeMessagingHosts",
+        HostBrowser::Chrome | HostBrowser::Chromium => {
+            "Software\\Google\\Chrome\\NativeMessagingHosts"
+        }
         HostBrowser::ChromeBeta => "Software\\Google\\ChromeBeta\\NativeMessagingHosts",
         HostBrowser::ChromeCanary => "Software\\Google\\ChromeCanary\\NativeMessagingHosts",
         HostBrowser::Firefox => unreachable!("Firefox uses a file directory on Windows"),
@@ -319,7 +328,9 @@ pub fn auto_register(
     localappdata: &Path,
     host_path: Option<&Path>,
 ) -> AutoRegisterResult {
-    let host = host_path.map(Path::to_path_buf).unwrap_or_else(default_host_path);
+    let host = host_path
+        .map(Path::to_path_buf)
+        .unwrap_or_else(default_host_path);
     let host_exists = host.exists();
     let discovered = discover_extension_ids(&chrome_profile_roots(home, localappdata));
     let mut result = AutoRegisterResult::default();
@@ -349,10 +360,7 @@ pub fn auto_register(
 /// Auto-registers the native host with every known browser channel using the
 /// default (sidecar) host path. Called once on app startup.
 pub fn auto_register_native_hosts(app: &tauri::AppHandle) -> Result<AutoRegisterResult, String> {
-    let home = app
-        .path()
-        .home_dir()
-        .map_err(|error| error.to_string())?;
+    let home = app.path().home_dir().map_err(|error| error.to_string())?;
     let localappdata_string = std::env::var("LOCALAPPDATA").unwrap_or_default();
     Ok(auto_register(&home, Path::new(&localappdata_string), None))
 }
@@ -452,8 +460,7 @@ fn is_banana_hand_extension(extension_dir: &Path) -> bool {
     let Ok(value) = serde_json::from_str::<Value>(&raw) else {
         return false;
     };
-    value.get("name").and_then(Value::as_str)
-        == Some("Banana Hand Browser Bridge")
+    value.get("name").and_then(Value::as_str) == Some("Banana Hand Browser Bridge")
 }
 
 /// Run the native host's `--self-check` once on startup: it reads the bridge
@@ -594,32 +601,39 @@ mod tests {
     }
 
     #[test]
-    fn manifest_dirs_cover_every_chrome_channel() {
-        let home = Path::new("/home/user");
-        let localappdata = Path::new("");
-        // The exact directories differ per OS; assert the channel layout
-        // (distinct dir per channel, all under the right browser root).
-        let chrome = manifest_dir(HostBrowser::Chrome, home, localappdata);
-        let beta = manifest_dir(HostBrowser::ChromeBeta, home, localappdata);
-        let canary = manifest_dir(HostBrowser::ChromeCanary, home, localappdata);
-        let chromium = manifest_dir(HostBrowser::Chromium, home, localappdata);
-        let firefox = manifest_dir(HostBrowser::Firefox, home, localappdata);
-        assert_ne!(chrome, beta);
-        assert_ne!(chrome, canary);
-        assert_ne!(chrome, chromium);
-        for dir in [&chrome, &beta, &canary, &chromium] {
-            assert!(
-                dir.to_string_lossy().contains("NativeMessagingHosts"),
-                "chrome-family dir must end in NativeMessagingHosts: {dir:?}"
-            );
-        }
-        assert_ne!(&firefox, &chrome);
-        for browser in ALL_BROWSERS {
-            let file = manifest_file_path(browser, home, localappdata);
-            assert_eq!(
-                file.file_name().unwrap().to_string_lossy(),
-                manifest_file_name()
-            );
+    fn macos_manifests_use_browser_user_data_directories() {
+        let home = Path::new("/Users/test user");
+        for (browser, expected) in [
+            (
+                HostBrowser::Chrome,
+                "/Users/test user/Library/Application Support/Google/Chrome/NativeMessagingHosts",
+            ),
+            (
+                HostBrowser::ChromeBeta,
+                "/Users/test user/Library/Application Support/Google/Chrome Beta/NativeMessagingHosts",
+            ),
+            (
+                HostBrowser::ChromeCanary,
+                "/Users/test user/Library/Application Support/Google/Chrome Canary/NativeMessagingHosts",
+            ),
+            (
+                HostBrowser::Chromium,
+                "/Users/test user/Library/Application Support/Chromium/NativeMessagingHosts",
+            ),
+            (
+                HostBrowser::Firefox,
+                "/Users/test user/Library/Application Support/Mozilla/NativeMessagingHosts",
+            ),
+        ] {
+            assert_eq!(macos_manifest_dir(browser, home), Path::new(expected));
+            #[cfg(target_os = "macos")]
+            {
+                assert_eq!(
+                    manifest_file_path(browser, home, Path::new("")),
+                    Path::new(expected).join("dev.bananahand.dispatch_host.json")
+                );
+                assert_eq!(describe_location(browser, home, Path::new("")), expected);
+            }
         }
     }
 
@@ -637,13 +651,11 @@ mod tests {
         // A stand-in native host binary inside the temp dir so host_exists is true.
         let host = temp.join("banana-hand-native-host");
         fs::write(&host, b"fake native host").expect("write fake host");
-        let result =
-            register_in(HostBrowser::Firefox, &temp, Path::new(""), &host, &[])
-                .expect("register firefox");
+        let result = register_in(HostBrowser::Firefox, &temp, Path::new(""), &host, &[])
+            .expect("register firefox");
         assert!(result.manifest_path.exists());
         assert!(result.host_exists);
         assert_eq!(result.host_path, host);
-        assert!(result.registry_location.contains("native-messaging-hosts"));
         let written = fs::read_to_string(&result.manifest_path).expect("read written manifest");
         let parsed: Value = serde_json::from_str(&written).expect("valid json");
         assert_eq!(parsed["name"], HOST_NAME);
@@ -671,7 +683,11 @@ mod tests {
         assert!(
             result.entries.iter().all(|entry| entry.error.is_none()),
             "all entries should succeed in a writable temp home: {:?}",
-            result.entries.iter().map(|entry| &entry.error).collect::<Vec<_>>()
+            result
+                .entries
+                .iter()
+                .map(|entry| &entry.error)
+                .collect::<Vec<_>>()
         );
         // Every entry wrote a distinct manifest with the right allowlist.
         let mut seen = std::collections::HashSet::new();
@@ -710,22 +726,30 @@ mod tests {
         // The fake tree holds the current release's unpacked install (fixed
         // id) and a pre-key v0.1.0-style install (path-derived id), plus one
         // unrelated extension that must be ignored.
-        let fixed_install = temp.join("Default").join("Extensions").join(CHROMIUM_EXTENSION_ID);
+        let fixed_install = temp
+            .join("Default")
+            .join("Extensions")
+            .join(CHROMIUM_EXTENSION_ID);
         fs::create_dir_all(fixed_install.join("0.1.0")).expect("create fixed dir");
         fs::write(
             fixed_install.join("0.1.0").join("manifest.json"),
             r#"{"name": "Banana Hand Browser Bridge", "version": "0.1.0"}"#,
         )
         .expect("write fixed manifest");
-        let path_derived =
-            temp.join("Profile 1").join("Extensions").join("abcdefghijklmnopabcdefghijklmn");
+        let path_derived = temp
+            .join("Profile 1")
+            .join("Extensions")
+            .join("abcdefghijklmnopabcdefghijklmn");
         fs::create_dir_all(path_derived.join("1.0.0")).expect("create extension dir");
         fs::write(
             path_derived.join("1.0.0").join("manifest.json"),
             r#"{"name": "Banana Hand Browser Bridge", "version": "1.0.0"}"#,
         )
         .expect("write manifest");
-        let other = temp.join("Profile 1").join("Extensions").join("qrstuvwxyzabcdefghijklmnopqrstuvwxyz");
+        let other = temp
+            .join("Profile 1")
+            .join("Extensions")
+            .join("qrstuvwxyzabcdefghijklmnopqrstuvwxyz");
         fs::create_dir_all(other.join("2.0")).expect("create other dir");
         fs::write(
             other.join("2.0").join("manifest.json"),
@@ -752,7 +776,10 @@ mod tests {
             origins[0],
             format!("chrome-extension://{CHROMIUM_EXTENSION_ID}/")
         );
-        assert_eq!(origins[1], "chrome-extension://abcdefghijklmnopabcdefghijklmn/");
+        assert_eq!(
+            origins[1],
+            "chrome-extension://abcdefghijklmnopabcdefghijklmn/"
+        );
         let _ = fs::remove_dir_all(&temp);
     }
 

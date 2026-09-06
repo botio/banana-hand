@@ -1,13 +1,12 @@
 use std::{
     fs,
     io::{self, Read, Write},
-    sync::{Arc, mpsc},
+    sync::mpsc,
     thread,
-    time::Duration,
 };
 
-// `BufReader`/`BufRead` are only used by the Unix branch of `read_line`;
-// the Windows branch reads whole messages from a message-mode pipe instead.
+// Unix desktop responses are newline-framed; keep one reader for the session.
+// Windows reads whole messages from a message-mode pipe instead.
 #[cfg(unix)]
 use std::io::{BufRead, BufReader};
 
@@ -17,8 +16,6 @@ use banana_hand_protocol::{
 };
 use serde_json::Value;
 use thiserror::Error;
-
-use parking_lot::Mutex;
 
 const MAX_NATIVE_MESSAGE_BYTES: usize = 1_048_576;
 #[cfg(target_os = "windows")]
@@ -37,6 +34,11 @@ enum HostError {
     BridgeConfig(#[source] io::Error),
     #[error("bridge is unavailable: {0}")]
     BridgeUnavailable(#[source] io::Error),
+}
+
+enum RelayEvent {
+    Desktop(Result<Value, HostError>),
+    Browser(Option<Value>),
 }
 
 /// The native host is a short-lived, browser-launched process. On any hard
@@ -154,31 +156,6 @@ impl DesktopTransport {
             pipe_write(handle, bytes)
         }
     }
-
-    /// Reads one newline-framed object. On a message-mode pipe a single
-    /// Read/Write round trip is exactly one such object.
-    fn read_line(&mut self) -> Result<Option<String>, HostError> {
-        #[cfg(unix)]
-        {
-            let stream = match self {
-                Self::Unix(stream) => stream,
-            };
-            let mut reader = BufReader::new(stream);
-            let mut line = String::new();
-            match reader.read_line(&mut line) {
-                Ok(0) => Ok(None),
-                Ok(_) => Ok(Some(line)),
-                Err(error) => Err(HostError::BridgeUnavailable(error)),
-            }
-        }
-        #[cfg(target_os = "windows")]
-        {
-            let handle = match self {
-                Self::Pipe(handle) => *handle,
-            };
-            pipe_read_message(handle)
-        }
-    }
 }
 
 #[cfg(target_os = "windows")]
@@ -259,24 +236,24 @@ fn pipe_read_message(
 
 fn run() -> Result<(), HostError> {
     let config = read_bridge_config()?;
-    let transport = DesktopTransport::connect(&config)?;
-    let bridge_writer = Arc::new(Mutex::new(transport.clone()));
+    let mut bridge_writer = DesktopTransport::connect(&config)?;
+    let transport = bridge_writer.clone();
 
-    let (desktop_tx, desktop_rx) = mpsc::channel();
-    thread::spawn(move || read_desktop_messages(transport, desktop_tx));
-
-    let (browser_tx, browser_rx) = mpsc::channel();
-    thread::spawn(move || read_browser_messages(browser_tx));
+    let (sender, receiver) = mpsc::channel();
+    let desktop_sender = sender.clone();
+    thread::spawn(move || {
+        if let Err(error) = read_desktop_messages(transport, &desktop_sender) {
+            let _ = desktop_sender.send(RelayEvent::Desktop(Err(error)));
+        }
+    });
+    thread::spawn(move || read_browser_messages(sender));
 
     let stdout = io::stdout();
     let mut output = stdout.lock();
-    loop {
-        while let Ok(message) = desktop_rx.try_recv() {
-            write_native_message(&mut output, &message)?;
-        }
-
-        match browser_rx.recv_timeout(Duration::from_millis(100)) {
-            Ok(Some(message)) => {
+    for event in receiver {
+        match event {
+            RelayEvent::Desktop(message) => write_native_message(&mut output, &message?)?,
+            RelayEvent::Browser(Some(message)) => {
                 let request_id = message
                     .get("request_id")
                     .and_then(Value::as_str)
@@ -290,12 +267,10 @@ fn run() -> Result<(), HostError> {
                     },
                 };
                 let encoded = serde_json::to_vec(&request)?;
-                let mut writer = bridge_writer.lock();
-                writer.write_bytes(&encoded)?;
-                writer.write_bytes(b"\n")?;
+                bridge_writer.write_bytes(&encoded)?;
+                bridge_writer.write_bytes(b"\n")?;
             }
-            Ok(None) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            RelayEvent::Browser(None) => break,
         }
     }
     Ok(())
@@ -312,35 +287,62 @@ fn read_bridge_config() -> Result<NativeHostBridgeConfig, HostError> {
     serde_json::from_str(&raw).map_err(HostError::InvalidJson)
 }
 
-fn read_desktop_messages(transport: DesktopTransport, sender: mpsc::Sender<Value>) {
-    let mut transport = transport;
+fn read_desktop_messages(
+    transport: DesktopTransport,
+    sender: &mpsc::Sender<RelayEvent>,
+) -> Result<(), HostError> {
+    #[cfg(unix)]
+    let mut reader = match transport {
+        DesktopTransport::Unix(stream) => BufReader::new(stream),
+    };
+    #[cfg(target_os = "windows")]
+    let handle = match transport {
+        DesktopTransport::Pipe(handle) => handle,
+    };
+    let mut line = String::new();
     loop {
-        match transport.read_line() {
-            Ok(Some(line)) => match serde_json::from_str::<HostBridgeResponse>(&line) {
-                Ok(response) => {
-                    if sender.send(response.response).is_err() {
-                        return;
-                    }
-                }
-                Err(_) => {}
-            },
-            Ok(None) | Err(_) => return,
+        line.clear();
+        #[cfg(unix)]
+        let length = reader
+            .read_line(&mut line)
+            .map_err(HostError::BridgeUnavailable)?;
+        #[cfg(target_os = "windows")]
+        let length = match pipe_read_message(handle)? {
+            Some(message) => {
+                line = message;
+                line.len()
+            }
+            None => 0,
+        };
+        if length == 0 {
+            return Err(HostError::BridgeUnavailable(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "桌面 App 已中斷橋接連線",
+            )));
+        }
+        if let Ok(response) = serde_json::from_str::<HostBridgeResponse>(&line) {
+            if sender
+                .send(RelayEvent::Desktop(Ok(response.response)))
+                .is_err()
+            {
+                return Ok(());
+            }
         }
     }
 }
 
-fn read_browser_messages(sender: mpsc::Sender<Option<Value>>) {
+fn read_browser_messages(sender: mpsc::Sender<RelayEvent>) {
     let stdin = io::stdin();
     let mut input = stdin.lock();
     loop {
         match read_native_message(&mut input) {
             Ok(Some(message)) => {
-                if sender.send(Some(message)).is_err() {
+                if sender.send(RelayEvent::Browser(Some(message))).is_err() {
                     return;
                 }
             }
             Ok(None) | Err(_) => {
-                let _ = sender.send(None);
+                let _ = sender.send(RelayEvent::Browser(None));
                 return;
             }
         }

@@ -3,6 +3,12 @@ const NATIVE_HOST_NAME = "dev.bananahand.dispatch_host";
 const INSTANCE_KEY = "browserInstanceId";
 const RECONNECT_BASE_MS = 3000;
 const RECONNECT_MAX_MS = 30000;
+// An idle event page can lose setTimeout retries; alarms wake it again.
+const CONNECT_WATCH_ALARM = "connect-watch";
+
+function ensureConnectWatch() {
+  browser.alarms.create(CONNECT_WATCH_ALARM, { periodInMinutes: 1 });
+}
 
 let nativePort;
 let sessionNonce = crypto.randomUUID();
@@ -100,6 +106,7 @@ function connectNativeHost() {
   const port = browser.runtime.connectNative(NATIVE_HOST_NAME);
   nativePort = port;
   port.onMessage.addListener((message) => {
+    if (nativePort !== port) return;
     // Any message from the host proves the bridge is alive; reset backoff so a
     // later drop retries quickly.
     reconnectDelayMs = RECONNECT_BASE_MS;
@@ -107,7 +114,10 @@ function connectNativeHost() {
       // The handshake was rejected (stale capability token after an app
       // restart, or a protocol mismatch). Tearing the port down makes the
       // retry loop relaunch the host, which re-reads the fresh bridge.json.
+      // Local disconnect does not fire this port's onDisconnect event.
+      nativePort = undefined;
       port.disconnect();
+      scheduleReconnect();
       return;
     }
     lastDisconnectReason = undefined;
@@ -116,8 +126,8 @@ function connectNativeHost() {
   port.onDisconnect.addListener(() => {
     if (nativePort !== port) return;
     nativePort = undefined;
-    if (browser.runtime.lastError) {
-      lastDisconnectReason = String(browser.runtime.lastError.message ?? browser.runtime.lastError);
+    if (port.error) {
+      lastDisconnectReason = String(port.error.message ?? port.error);
     }
     console.warn("[banana-hand] native host connect failed:", lastDisconnectReason);
     scheduleReconnect();
@@ -165,7 +175,19 @@ browser.runtime.onStartup.addListener(() => {
     clearTimeout(reconnectTimer);
     reconnectTimer = undefined;
   }
+  ensureConnectWatch();
   void ensureBrowserInstanceId().then(connectNativeHost);
 });
 
+browser.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== CONNECT_WATCH_ALARM || nativePort) return;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = undefined;
+  }
+  reconnectDelayMs = RECONNECT_BASE_MS;
+  void ensureBrowserInstanceId().then(connectNativeHost);
+});
+
+ensureConnectWatch();
 void ensureBrowserInstanceId().then(connectNativeHost);

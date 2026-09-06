@@ -126,7 +126,7 @@ cargo build -p banana-hand-native-host
 - desktop installer 應安裝 host binary 與各 browser 的 native messaging manifest，但不得旁載 extension。
 
 App 啟動時的自動登錄（`native_host::auto_register`）會把同一份 manifest 寫入所有已知通道：
-macOS 為 `~/Library/Google/Chrome{, Beta, Canary}/NativeMessagingHosts/`、
+macOS 為 `~/Library/Application Support/Google/Chrome{, Beta, Canary}/NativeMessagingHosts/`、
 `~/Library/Application Support/Chromium/NativeMessagingHosts/`、
 `~/Library/Application Support/Mozilla/NativeMessagingHosts/`；Linux 為
 `~/.config/{google-chrome,google-chrome-beta,google-chrome-canary,chromium}/NativeMessagingHosts/`、

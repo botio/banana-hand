@@ -106,7 +106,6 @@ name = "banana-hand-native-host"
 version = "0.1.6"
 dependencies = [
  "banana-hand-protocol",
- "parking_lot",
  "serde_json",
  "thiserror 2.0.20",
  "windows-sys 0.61.2",

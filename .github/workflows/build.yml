@@ -78,6 +78,11 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Verify native host and extension reconnect regressions
+        run: |
+          cargo test -p banana-hand-native-host
+          npm run test:extensions
+
       - name: Verify shortcut input survives background refresh
         if: matrix.os == 'ubuntu-24.04'
         run: |

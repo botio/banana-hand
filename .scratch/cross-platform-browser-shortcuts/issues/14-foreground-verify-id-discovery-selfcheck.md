@@ -132,7 +132,42 @@ Chrome 相同的 `console.warn`（之前 Firefox 把 `lastDisconnectReason`
 把 self-check 字串提到 if-chain 之前、三個分支（有 Tab、0 host、有 host
 無 Tab）一律附上。
 
-Chrome「Specified native messaging host not found」且 manifest／ID 全部
-正確時，指向 Chrome browser process 從未完整重啟（host 清單只在
-browser process 啟動時讀取）——v0.1.6 不改此路徑，靠上面的自我診斷
-行 + 使用者完整重啟 Chrome 驗證。
+更正：本輪把 Chrome 問題歸因於「未完整重啟」的推論不成立。
+manifest 內容與 extension ID 相符，不代表登錄目錄正確；真正的
+macOS 使用者路徑必須包含 `Library/Application Support/Google/Chrome`。
+
+## Comments
+
+### 2026-09-06：v0.1.6 回報的根因與修正
+
+- Chrome：混淆 `/Library/Google/Chrome` 系統層路徑與使用者層路徑，
+  導致自動登錄漏掉 `Application Support`。stable／Beta／Canary
+  全部修正，並加入可在 Linux 執行的 macOS 目錄回歸測試。
+  依據：[Chrome 官方 native messaging 文件](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging)。
+- 重啟不重連：以真實 native-host 程序重現，App socket 關閉但 browser
+  stdin 保持開啟時，host 不退出。原雙 channel 輪詢忽略 desktop channel
+  的 Disconnected；改為同一事件 channel，EOF／讀取錯誤終止 host，
+  讓 browser 收到 onDisconnect 並沿用既有重試流程。
+- 同一 relay 邊界原本每行重建 BufReader，會丟掉預讀的下一筆訊息。
+  改為整個連線保留同一 reader；以多筆 response 合併寫入驗證順序及完整性。
+- 發送診斷：Tauri `Result<_, String>` 的拒絕值是字串，前端卻只保留
+  Error.message，其他值全改成「發送請求失敗」。回歸測試先失敗、
+  修正後能顯示原始拒絕原因；未把實際 Mac 的拒絕原因當成已知。
+- macOS 前景閘門：手寫 EXCLUDE_DESKTOP=2 不正確；2 是
+  OnScreenAboveWindow，ExcludeDesktopElements 是 1<<4。
+  改用既有 core-graphics crate 的常數，不再手寫這組 flag。
+- self-check 僅是啟動時讀 config 並嘗試建立 socket／pipe 連線，
+  不做 token 握手，也不驗證 Chrome discovery、持續存活或輸入權限。
+  `ok` 與上述故障可以同時存在。
+
+驗證：native-host 程序回歸涵蓋 EOF、讀取錯誤與合併訊息；
+真實 Firefox background.js 搭配真實 native-host 與模擬 browser API／
+App socket，重啟後無需 Tab 活動或重載即可用新 token 重新 hello。
+這不是 macOS Firefox 實機輸入驗證；Mac 前景與快捷鍵送達仍待實機確認。
+
+同輪補齊 extension 生命週期：local `port.disconnect()` 不會觸發自身
+onDisconnect，因此握手拒絕分支必須主動清掉 port 並排程重連；
+兩個 browser 均有先失敗、修正後通過的回歸測試。Firefox manifest
+是非 persistent event page，新增與 Chromium 相同的每分鐘 alarm，
+避免 App 長時間未開時 setTimeout 隨背景頁卸載而消失。Firefox 斷線
+原因改讀正式 API 的 `port.error`，不再讀 Chrome 專用 lastError。

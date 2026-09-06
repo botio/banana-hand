@@ -443,7 +443,9 @@ async function dispatchShortcut(): Promise<void> {
     dispatchResult = formatOutcome(outcome);
     await refreshRuntime();
   } catch (error) {
-    dispatchResult = error instanceof Error ? error.message : "發送請求失敗。";
+    dispatchResult = error instanceof Error
+      ? error.message
+      : typeof error === "string" ? error : "發送請求失敗。";
     render();
   }
 }

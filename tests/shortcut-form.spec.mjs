@@ -289,3 +289,57 @@ test("each shortcut card has a delete button that removes it", async ({ page }) 
   await expect(page.locator("#shortcut-list")).toContainText("尚無快捷鍵");
   await expect(page.locator("#connection-status")).toContainText("已刪除「待刪快捷鍵」");
 });
+
+test("dispatch preserves the native coordinator's string rejection", async ({ page }) => {
+  const reason = "目標前景驗證逾時；發送已拒絕";
+  await page.addInitScript((reason) => {
+    const tabs = [1, 2].map((id) => ({
+      title: `Firefox ${id}`,
+      target: {
+        browser: "firefox",
+        browser_instance_id: "dispatch-test",
+        session_nonce: "current-session",
+        window_id: 1,
+        tab_id: id,
+        generation: 1,
+      },
+    }));
+    window.__TAURI_INTERNALS__ = {
+      metadata: {
+        currentWindow: { label: "main" },
+        currentWebview: { label: "main" },
+      },
+      async invoke(command) {
+        switch (command) {
+          case "plugin:store|load":
+            return "test-store-rid";
+          case "plugin:store|get":
+            return [{
+              schemaVersion: 1,
+              shortcuts: [{ id: "dispatch", name: "發送測試", chord: "F8", order: 0 }],
+            }, true];
+          case "runtime_snapshot":
+            return {
+              tabs,
+              connected_hosts: 1,
+              cooldown_remaining_seconds: 0,
+              last_bridge_rejection: null,
+              last_host_disconnect_reason: null,
+              host_self_check: "ok",
+            };
+          case "native_host_registration":
+            return { entries: [] };
+          case "request_dispatch":
+            throw reason;
+          default:
+            throw new Error(`unexpected command ${command}`);
+        }
+      },
+    };
+  }, reason);
+  await page.goto(url);
+  await page.locator("#first-target").selectOption({ label: "firefox · 視窗 1 · Firefox 1" });
+  await page.locator("#second-target").selectOption({ label: "firefox · 視窗 1 · Firefox 2" });
+  await page.locator("#dispatch").click();
+  await expect(page.locator("#result")).toHaveText(reason);
+});

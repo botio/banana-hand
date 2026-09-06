@@ -108,6 +108,7 @@ function connectNativeHost() {
   const port = chrome.runtime.connectNative(NATIVE_HOST_NAME);
   nativePort = port;
   port.onMessage.addListener((message) => {
+    if (nativePort !== port) return;
     // Any message from the host proves the bridge is alive; reset backoff so a
     // later drop retries quickly.
     reconnectDelayMs = RECONNECT_BASE_MS;
@@ -115,7 +116,10 @@ function connectNativeHost() {
       // The handshake was rejected (stale capability token after an app
       // restart, or a protocol mismatch). Tearing the port down makes the
       // retry loop relaunch the host, which re-reads the fresh bridge.json.
+      // Local disconnect does not fire this port's onDisconnect event.
+      nativePort = undefined;
       port.disconnect();
+      scheduleReconnect();
       return;
     }
     lastDisconnectReason = undefined;
