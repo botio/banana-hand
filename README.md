@@ -11,8 +11,8 @@ Firefox extension 的 `.xpi`。這些是可下載、可驗證的打包產物；*
 平台／browser 配對已得到正式支援宣稱**。正式支援前仍須完成
 [ADR 0003 的 24-cell 實機發布證據矩陣](docs/adr/0003-release-evidence-matrix.md)。
 
-Firefox `.xpi` 目前未經 AMO 簽署，只能在 Firefox Developer Edition、Nightly 或
-ESR（停用 signature enforcement）安裝。
+Firefox 發布流程透過 AMO unlisted signing 產生可供標準 Firefox 安裝的 `.xpi`；
+簽章失敗會中止發布。AMO 簽章不代表上架 AMO 搜尋目錄，暫用 ZIP 則供開發除錯。
 
 ## 使用說明（給一般使用者）
 
@@ -27,8 +27,8 @@ Banana Hand 讓「一個快捷鍵」同時對兩個瀏覽器分頁做動作。�
 
 > App 靠「瀏覽器插件」看得到你的分頁。Preview Release 附帶 Chrome 的
 > `banana-hand-chromium-<版本>.zip`，以及可在標準 Firefox 暫時載入的
-> `banana-hand-firefox-temporary-<版本>.zip`。AMO unlisted-signed
-> `banana-hand-firefox-<版本>.xpi` 只會在 release note 明示為「AMO-signed」時附帶。
+> `banana-hand-firefox-temporary-<版本>.zip`。一般 Firefox 使用者請下載
+> release 中 AMO-signed 的 `.xpi`，不需要暫時載入或停用簽章檢查。
 
 **Chrome**
 1. 從同版本 Preview Release 下載 `banana-hand-chromium-<版本>.zip` 並解壓。
@@ -37,13 +37,19 @@ Banana Hand 讓「一個快捷鍵」同時對兩個瀏覽器分頁做動作。�
 4. 按「載入未封裝的擴充功能」，選擇解壓後、含 `manifest.json` 的資料夾。
 5. 清單出現「Banana Hand Browser Bridge」即成功。
 
-**Firefox（目前可用的暫時載入）**
+**Firefox（AMO-signed，永久安裝）**
+1. 從同版本 Preview Release 下載 AMO-signed 的 `.xpi`。
+2. 地址列輸入 `about:addons`，點齒輪 →「從檔案安裝附加元件…」，選擇 `.xpi`。
+3. 確認安裝及權限提示。重新啟動 Firefox 後仍會保留。
+4. 此 unlisted 發布尚未設定自動更新來源；新版本需下載新的已簽署 `.xpi` 安裝更新。
+
+**Firefox（開發除錯用暫時載入）**
 1. 從同版本 Preview Release 下載 `banana-hand-firefox-temporary-<版本>.zip` 並解壓。
 2. 地址列輸入 `about:debugging#/runtime/this-firefox`，按 Enter。
 3. 按「載入暫用附加元件…」（Load Temporary Add-on…），選擇解壓資料夾中的 `manifest.json`。
 4. 清單出現「Banana Hand Browser Bridge」即成功；Firefox 每次重新啟動後要重做第 2–3 步。
 
-> 若 release note 明示存在「AMO-signed」的 `.xpi`，可改到 `about:addons` → 右上齒輪 →「安裝附加元件…」永久安裝。未簽署 `.xpi` 不能在標準 Firefox 安裝。
+> 未簽署 `.xpi` 不能在標準 Firefox 永久安裝；請勿將本機未簽署打包產物當成 AMO-signed 發布檔。
 
 ### 第 3 步：讓 Browser 找到 Host（自動）
 
@@ -122,7 +128,7 @@ cargo build -p banana-hand-native-host
 ## Browser extension 與 native host
 
 - Chromium MV3 source：`extensions/chromium/`。Chrome 使用；正式版從 Chrome Web Store 安裝。
-- Firefox source：`extensions/firefox/`。其固定 Gecko Add-on ID 是 `bridge@banana-hand.dev`；正式版須由 AMO 簽署。
+- Firefox MV3 source：`extensions/firefox/`。使用非持續性背景事件頁（`background.scripts`），不是 Firefox 尚未支援的 extension service worker。固定 Gecko Add-on ID 是 `bridge@banana-hand.dev`；發布須由 AMO 簽署。
 - desktop installer 應安裝 host binary 與各 browser 的 native messaging manifest，但不得旁載 extension。
 
 App 啟動時的自動登錄（`native_host::auto_register`）會把同一份 manifest 寫入所有已知通道：

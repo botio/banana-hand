@@ -147,16 +147,17 @@ jobs:
         run: node scripts/package-firefox-temporary-extension.mjs
 
 
+      - name: Validate Firefox manifest and extension
+        run: npx web-ext lint --source-dir=extensions/firefox --warnings-as-errors
+
       - name: Sign Firefox extension through AMO
         env:
           WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
           WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
         run: |
-          if [ -n "${WEB_EXT_API_KEY}" ] && [ -n "${WEB_EXT_API_SECRET}" ]; then
-            npm run sign-firefox-extension
-          else
-            echo "AMO_JWT_ISSUER/AMO_JWT_SECRET not set; skipping AMO signing. The Firefox temporary ZIP is still published."
-          fi
+          : "${WEB_EXT_API_KEY:?AMO_JWT_ISSUER is required for a signed Firefox release}"
+          : "${WEB_EXT_API_SECRET:?AMO_JWT_SECRET is required for a signed Firefox release}"
+          npm run sign-firefox-extension
 
       - name: Download desktop artifacts
         uses: actions/download-artifact@v4
@@ -168,11 +169,7 @@ jobs:
           mkdir -p release-assets/browser-extensions
           cp dist/chromium-extension/*.zip release-assets/browser-extensions/
           cp dist/firefox-temporary-extension/*.zip release-assets/browser-extensions/
-          if ls dist/firefox-extension/*.xpi >/dev/null 2>&1; then
-            cp dist/firefox-extension/*.xpi release-assets/browser-extensions/
-          else
-            echo "No AMO-signed XPI present; skipping XPI staging."
-          fi
+          cp dist/firefox-extension/*.xpi release-assets/browser-extensions/
 
       - name: Publish GitHub preview release
         env:
@@ -183,7 +180,7 @@ jobs:
             -o -name '*.zip' -o -name '*.xpi' \
           \) -print0)
           test "${#assets[@]}" -gt 0
-          notes=$'Preview release only: build artifacts are attached, but this release does not claim a supported platform/browser pair. See docs/adr/0003-release-evidence-matrix.md for the required 24-cell real-device evidence matrix.\n\nmacOS (Apple Silicon): the DMG is ad-hoc signed (no Apple Developer ID), so Gatekeeper blocks first launch with "The application is damaged and cannot be opened." Drag the app into /Applications, then clear the quarantine once in Terminal and it opens normally: xattr -dr com.apple.quarantine "/Applications/Banana Hand.app". You may be asked to allow Terminal to make changes. We are evaluating an Apple Developer ID ($99/yr) to remove this one-time step; an ad-hoc or self-signed build cannot produce the Gatekeeper "Open Anyway" flow on recent macOS without one.\n\nChromium: the extension uses a fixed ID (mooakjhlbkjfbmbmliklkmfmacnomlai) so the native host registers automatically; no manual extension-ID entry is needed.\n\nFirefox: use the temporary ZIP via about:debugging > Load Temporary Add-on; the extension ID bridge@banana-hand.dev is a placeholder because AMO signing is not configured.\n\nLinux: the AppImage bundles the native host at banana-hand-native-host, the .deb installs it at /usr/bin/banana-hand-native-host.\n\nWindows: the Inno Setup installer bundles the native host; the NSIS build is untested, and the app may show an "unknown publisher" SmartScreen warning because no code-signing certificate is configured.\n\nThis is a preview release; please report issues in the tracker.\n'
+          notes=$'Preview release only: build artifacts are attached, but this release does not claim a supported platform/browser pair. See docs/adr/0003-release-evidence-matrix.md for the required 24-cell real-device evidence matrix.\n\nFirefox: this release includes an AMO-signed unlisted XPI. Install it permanently through about:addons > gear menu > Install Add-on From File. The extension uses Manifest V3 with a Firefox event page, not a service worker. Its fixed ID remains bridge@banana-hand.dev. Download and install the signed XPI again for updates; no automatic update source is configured. The temporary ZIP remains available for development via about:debugging.\n\nChromium: unzip banana-hand-chromium and use Load unpacked in chrome://extensions. The fixed extension ID is mooakjhlbkjfbmbmliklkmfmacnomlai.\n\nWindows: the NSIS installer bundles the native host and offline WebView2 Runtime installer. No Authenticode certificate is configured, so SmartScreen may show an unknown publisher warning. This does not establish that earlier launch failures were caused by WebView2.\n\nmacOS (Apple Silicon): the DMG is ad-hoc signed, without Apple Developer ID or notarization. If Gatekeeper blocks launch, after verifying the download source, copy the app to /Applications and clear quarantine with: xattr -dr com.apple.quarantine "/Applications/Banana Hand.app".\n\nLinux: the AppImage bundles the native host; the .deb installs it at /usr/bin/banana-hand-native-host.\n'
           if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             gh release edit "${GITHUB_REF_NAME}" \
               --repo "${GITHUB_REPOSITORY}" \
