@@ -664,7 +664,12 @@ mod tests {
                 )
             };
             assert_eq!(status, 0, "read manifest location from registry");
-            assert_eq!(data.pop(), Some(0), "REG_SZ must be NUL terminated");
+            // RegGetValueW reports the byte count including the NUL terminator;
+            // strip every trailing NUL rather than assuming exactly one.
+            while data.last() == Some(&0) {
+                data.pop();
+            }
+            assert!(!data.is_empty(), "manifest location must not be empty");
             let path = PathBuf::from(String::from_utf16(&data).expect("UTF-16 registry path"));
             assert!(path.is_absolute(), "browser needs an absolute manifest path");
             path
