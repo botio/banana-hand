@@ -132,7 +132,7 @@ try {
   // runs; a CDP tab click alone does not reproduce Windows focus handoff.
   execFileSync("pwsh", ["-NoProfile", "-Command", `$shell = New-Object -ComObject WScript.Shell; if (-not $shell.AppActivate(${desktop.pid})) { throw 'Could not foreground desktop' }`]);
   await app.locator("#dispatch").click();
-  await expect(app.locator("#result")).not.toHaveText("", { timeout: 15_000 });
+  await expect(app.locator("#result")).not.toContainText("正在要求", { timeout: 20_000 });
   const result = await app.locator("#result").textContent();
   logs.push(`Dispatch result: ${result}`);
   assert.ok(!result.includes("逾時"), `Foreground preparation timed out: ${result}`);
