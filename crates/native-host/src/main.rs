@@ -12,9 +12,9 @@ use std::io::{BufRead, BufReader};
 
 use banana_hand_protocol::{
     HostBridgeRequest, HostBridgeResponse, NativeHostBridgeConfig, NativeHostMessage,
-    local_runtime_directory,
+    PROTOCOL_MAJOR, local_runtime_directory,
 };
-use serde_json::Value;
+use serde_json::{Value, json};
 use thiserror::Error;
 
 const MAX_NATIVE_MESSAGE_BYTES: usize = 1_048_576;
@@ -73,7 +73,35 @@ fn main() {
 /// `connectNative` can only ever say "Native host has exited".
 fn self_check() -> Result<String, HostError> {
     let config = read_bridge_config()?;
-    DesktopTransport::connect(&config)?;
+    let mut transport = DesktopTransport::connect(&config)?;
+
+    // Exercise the full round trip, not just the pipe/socket connection: send
+    // a hello and require an ack, so a framing or parsing regression fails the
+    // check instead of surfacing later as a rejected browser handshake.
+    let hello = json!({
+        "type": "hello",
+        "request_id": "self-check",
+        "protocol_major": PROTOCOL_MAJOR,
+        "browser": "firefox",
+        "browser_instance_id": "self-check",
+        "session_nonce": "self-check",
+    });
+    let request = HostBridgeRequest {
+        capability_token: config.capability_token.clone(),
+        message: NativeHostMessage {
+            request_id: "self-check".into(),
+            message: hello,
+        },
+    };
+    let mut framed = serde_json::to_vec(&request)?;
+    framed.push(b'\n');
+    transport.write_bytes(&framed)?;
+    let response = transport.read_response()?;
+    if response.get("type").and_then(Value::as_str) != Some("ack") {
+        return Err(HostError::BridgeUnavailable(io::Error::other(format!(
+            "desktop answered self-check with an unexpected response: {response}"
+        ))));
+    }
     Ok("self-check ok: desktop bridge reachable".into())
 }
 
@@ -154,6 +182,41 @@ impl DesktopTransport {
                 Self::Pipe(handle) => *handle,
             };
             pipe_write(handle, bytes)
+        }
+    }
+
+    /// Read one newline-framed response line (Unix) or one message-mode
+    /// message (Windows) and parse it as a JSON value.
+    fn read_response(&mut self) -> Result<Value, HostError> {
+        #[cfg(unix)]
+        {
+            let stream = match self {
+                Self::Unix(stream) => stream,
+            };
+            let mut line = String::new();
+            BufReader::new(stream)
+                .read_line(&mut line)
+                .map_err(HostError::BridgeUnavailable)?;
+            serde_json::from_str(line.trim_end()).map_err(HostError::InvalidJson)
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let handle = match self {
+                Self::Pipe(handle) => *handle,
+            };
+            let message = pipe_read_message(handle)?.ok_or_else(|| {
+                HostError::BridgeUnavailable(io::Error::other("desktop closed without a response"))
+            })?;
+            let line = String::from_utf8_lossy(&message);
+            serde_json::from_str(line.trim_end()).map_err(HostError::InvalidJson)
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = self;
+            Err(HostError::BridgeUnavailable(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "this host build has no desktop bridge transport",
+            )))
         }
     }
 }
@@ -267,8 +330,12 @@ fn run() -> Result<(), HostError> {
                     },
                 };
                 let encoded = serde_json::to_vec(&request)?;
-                bridge_writer.write_bytes(&encoded)?;
-                bridge_writer.write_bytes(b"\n")?;
+                // Emit the JSON and its newline in a single write so the frame
+                // is one message on Windows message-mode pipes and stays one
+                // newline-terminated line on Unix streams.
+                let mut framed = encoded;
+                framed.push(b'\n');
+                bridge_writer.write_bytes(&framed)?;
             }
             RelayEvent::Browser(None) => break,
         }
