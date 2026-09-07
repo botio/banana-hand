@@ -193,7 +193,7 @@ Chrome／Firefox 的 installer 登錄位置必須依官方文件寫入。Brave �
 |---|---|---|---|
 | Linux X11 | Unix socket（`$XDG_RUNTIME_DIR/banana-hand/`，0700） | XTEST | 已驗證（本機） |
 | Linux Wayland | 同上 | **fail-closed**：`PortalPermissionRequired` | spec-only，見下 |
-| Windows | named pipe（`%LOCALAPPDATA%\Banana Hand\runtime\`，per-pid pipe） | `SendInput` event stream（送前驗證前景窗口） | 實機待驗 |
+| Windows | named pipe（`%LOCALAPPDATA%\Banana Hand\runtime\`，per-pid pipe） | `SendInput` event stream（送前驗證前景窗口） | 橋接已驗證（Windows CI）；注入 實機待驗 |
 | macOS Apple Silicon | Unix socket（`~/Library/Caches/Banana Hand/runtime`，0700） | CGEvent（Accessibility 提示 + 前景窗口驗證） | 實機待驗（ad-hoc DMG + xattr 清除隔離 + 授 Accessibility） |
 
 - **Linux Wayland**：portal 注入是 spec-only。`XDG_SESSION_TYPE=wayland` 時維持
@@ -204,10 +204,11 @@ Chrome／Firefox 的 installer 登錄位置必須依官方文件寫入。Brave �
   見 [docs/wayland-remote-desktop-portal.md](docs/wayland-remote-desktop-portal.md)。
 - **Windows**：named-pipe bridge（App 端 server + native host 端 client）與
   `SendInput` 輸入串流皆已實作；per-app-pid pipe 名寫入 `bridge.json` 供 host 發現。
-  FFI 已透過交叉編譯型別檢查（`banana-hand-native-host` 通過
-  `cargo check --target x86_64-pc-windows-gnu`；App 的 `named_pipe`/`SendInput` FFI
-  亦對 windows-sys 0.61 獨立通過型別檢查），但完整 App 建置仍需 mingw-w64
-  工具鏈（本開發機無），故仍待實機 host 登錄與注入證據。
+  橋接已由 `.github/workflows/windows-bridge.yml` 在真實 Windows runner 上驗證：
+  以實際 native host 與實際 Chromium extension 完成 hello／分頁快照／`prepare`↔`prepared`
+  往返，並以 overlapped I/O 讓同一 handle 的讀寫可同時進行（同步 I/O 會在讀寫皆掛起時死鎖）。
+  `SendInput` 注入與前景驗證仍待真實互動式工作階段證明（CI 的非互動視窗焦點語意無法重現）。
+  先前「須 mingw-w64 才能建完整 App」的限制已解除：CI 直接在 windows-latest 原生建置。
 - **macOS**：Unix-socket bridge 已指向 macOS 使用者專屬 cache 目錄（0700），
   CGEvent 會先查 Accessibility；ad-hoc、未 notarize 的 DMG 首次開啟需先以
   `xattr -dr com.apple.quarantine` 清除隔離屬性、再授 Accessibility，仍待實機驗證。
