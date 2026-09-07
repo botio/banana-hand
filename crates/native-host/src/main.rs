@@ -204,11 +204,10 @@ impl DesktopTransport {
             let handle = match self {
                 Self::Pipe(handle) => *handle,
             };
-            let message = pipe_read_message(handle)?.ok_or_else(|| {
+            let line = pipe_read_message(handle)?.ok_or_else(|| {
                 HostError::BridgeUnavailable(io::Error::other("desktop closed without a response"))
             })?;
-            let line = String::from_utf8_lossy(&message);
-            serde_json::from_str(line.trim_end()).map_err(HostError::InvalidJson)
+            serde_json::from_str(&line).map_err(HostError::InvalidJson)
         }
         #[cfg(not(any(unix, windows)))]
         {
