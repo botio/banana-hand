@@ -1,0 +1,115 @@
+name: Windows Bridge Regression
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Optional existing release to reproduce installed browser dispatch"
+        required: false
+        type: string
+  pull_request:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/native-host/**"
+      - "crates/protocol/**"
+      - "src-tauri/**"
+      - "src/**"
+      - "index.html"
+      - "package*.json"
+      - "tsconfig.json"
+      - "vite.config.ts"
+      - ".github/workflows/windows-bridge.yml"
+  push:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/native-host/**"
+      - "crates/protocol/**"
+      - "src-tauri/**"
+      - "src/**"
+      - "index.html"
+      - "package*.json"
+      - "tsconfig.json"
+      - "vite.config.ts"
+      - ".github/workflows/windows-bridge.yml"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  named-pipe:
+    name: Real native host bidirectional named pipe
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend assets for Tauri context
+        run: npm run build
+
+      - name: Build real native host before desktop tests
+        run: cargo build --locked -p banana-hand-native-host --target x86_64-pc-windows-msvc
+
+      - name: Stage sidecar required by Tauri build script
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force src-tauri/binaries | Out-Null
+          Copy-Item target/x86_64-pc-windows-msvc/debug/banana-hand-native-host.exe src-tauri/binaries/banana-hand-native-host-x86_64-pc-windows-msvc.exe
+
+      - name: Exercise idle readers through real native messaging
+        timeout-minutes: 20
+        run: cargo test --locked -p banana-hand --target x86_64-pc-windows-msvc windows_tests -- --nocapture --test-threads=1
+
+  installed-browser:
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+    name: Installed desktop and real Chromium dispatch
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install chromium
+      - name: Download selected installer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --pattern '*x64-setup.exe' --dir "$env:RUNNER_TEMP/installer"
+      - name: Verify installed desktop and actual browser dispatch
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem "$env:RUNNER_TEMP/installer/*x64-setup.exe" | Select-Object -First 1
+          $install = Join-Path $env:RUNNER_TEMP "banana hand browser install"
+          $diag = Join-Path $env:RUNNER_TEMP "browser-smoke"
+          ./scripts/verify-windows-startup.ps1 -InstallerPath $installer.FullName -InstallDirectory $install -DiagnosticsDirectory "$diag/startup" -StartupTimeoutSeconds 90
+          node scripts/verify-windows-browser.mjs "$install/banana-hand.exe" $diag
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-browser-smoke
+          path: ${{ runner.temp }}/browser-smoke

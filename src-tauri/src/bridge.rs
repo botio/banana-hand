@@ -958,3 +958,6 @@ mod tests {
         let _ = fs::remove_dir_all(&runtime_directory);
     }
 }
+
+#[cfg(all(test, target_os = "windows"))]
+mod windows_tests;
