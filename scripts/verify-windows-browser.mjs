@@ -81,6 +81,23 @@ try {
       await delay(200);
     }
   }
+  if (!webview) {
+    const processEvidence = execFileSync("pwsh", ["-NoProfile", "-Command", `
+      $all = @(Get-CimInstance Win32_Process)
+      $ids = @(${desktop.pid})
+      do {
+        $children = @($all | Where-Object { $_.ParentProcessId -in $ids -and $_.ProcessId -notin $ids })
+        $ids += @($children | ForEach-Object { $_.ProcessId })
+      } while ($children.Count -gt 0)
+      $app = Get-Process -Id ${desktop.pid}
+      @{
+        Window = @($app | Select-Object Id, MainWindowHandle, MainWindowTitle, Responding)
+        Processes = @($all | Where-Object { $_.ProcessId -in $ids } | Select-Object ProcessId, ParentProcessId, Name, CommandLine)
+        Listeners = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.OwningProcess -in $ids } | Select-Object LocalAddress, LocalPort, OwningProcess)
+      } | ConvertTo-Json -Depth 5
+    `], { encoding: "utf8", timeout: 15_000 });
+    logs.push(processEvidence);
+  }
   assert.ok(webview, `WebView2 CDP did not become available: ${connectionError}`);
   await expect.poll(() => webview.contexts().flatMap(context => context.pages()).length).toBeGreaterThan(0);
   app = webview.contexts().flatMap(context => context.pages())[0];
