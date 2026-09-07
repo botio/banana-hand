@@ -186,7 +186,8 @@ impl DesktopTransport {
     }
 
     /// Read one newline-framed response line (Unix) or one message-mode
-    /// message (Windows) and parse it as a JSON value.
+    /// message (Windows) and return the inner response value the desktop
+    /// dispatched (matching `read_desktop_messages`).
     fn read_response(&mut self) -> Result<Value, HostError> {
         #[cfg(unix)]
         {
@@ -197,7 +198,9 @@ impl DesktopTransport {
             BufReader::new(stream)
                 .read_line(&mut line)
                 .map_err(HostError::BridgeUnavailable)?;
-            serde_json::from_str(line.trim_end()).map_err(HostError::InvalidJson)
+            let response: HostBridgeResponse =
+                serde_json::from_str(line.trim_end()).map_err(HostError::InvalidJson)?;
+            Ok(response.response)
         }
         #[cfg(target_os = "windows")]
         {
@@ -207,7 +210,9 @@ impl DesktopTransport {
             let line = pipe_read_message(handle)?.ok_or_else(|| {
                 HostError::BridgeUnavailable(io::Error::other("desktop closed without a response"))
             })?;
-            serde_json::from_str(&line).map_err(HostError::InvalidJson)
+            let response: HostBridgeResponse =
+                serde_json::from_str(&line).map_err(HostError::InvalidJson)?;
+            Ok(response.response)
         }
         #[cfg(not(any(unix, windows)))]
         {
