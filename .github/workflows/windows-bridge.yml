@@ -85,6 +85,8 @@ jobs:
         run: cargo test --locked -p banana-hand --target x86_64-pc-windows-msvc windows_tests -- --nocapture --test-threads=1
 
       - name: Build desktop with embedded frontend
+        env:
+          TAURI_CONFIG: '{"app":{"windows":[{"title":"Banana Hand","width":1280,"height":800,"minWidth":980,"minHeight":680,"additionalBrowserArgs":"--remote-debugging-port=9222"}]}}'
         run: cargo build --locked -p banana-hand --target x86_64-pc-windows-msvc --features tauri/custom-protocol
 
       - run: npx playwright install chromium
