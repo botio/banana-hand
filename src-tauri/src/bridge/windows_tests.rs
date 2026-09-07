@@ -22,6 +22,7 @@ struct TestBridge {
     browser_output: Receiver<Result<Value, String>>,
     server: Option<thread::JoinHandle<()>>,
     server_done: Receiver<()>,
+    pipe: Option<named_pipe::PipeHandle>,
     coordinator: Arc<Mutex<DispatchCoordinator>>,
 }
 
@@ -43,6 +44,7 @@ impl TestBridge {
             browser_output,
             server: None,
             server_done,
+            pipe: None,
             coordinator: coordinator.clone(),
         };
         fs::create_dir_all(&runtime_directory).expect("create isolated host runtime directory");
@@ -63,17 +65,15 @@ impl TestBridge {
                 std::io::Error::last_os_error()
             )
         });
+        bridge.pipe = Some(Arc::clone(&pipe));
         let (accept_sender, accept_receiver) = mpsc::channel();
         bridge.server = Some(thread::spawn(move || {
             let _ = accept_sender.send(());
-            if connect_named_pipe(pipe) {
-                serve_pipe(pipe, coordinator, capability_token);
-            } else {
-                eprintln!(
-                    "[windows-bridge] ConnectNamedPipe failed: {}",
-                    std::io::Error::last_os_error()
-                );
-                close_pipe(pipe);
+            match connect_named_pipe(&pipe) {
+                Ok(()) => serve_pipe(pipe, coordinator, capability_token),
+                Err(error) => {
+                    eprintln!("[windows-bridge] ConnectNamedPipe failed: {error}");
+                }
             }
             let _ = done_sender.send(());
         }));
@@ -206,10 +206,16 @@ impl Drop for TestBridge {
                 }
             }
         }
-        if let Some(server) = self.server.take() {
-            // Also release an accept/read if the host failed before connecting.
-            unsafe {
-                windows_sys::Win32::System::IO::CancelSynchronousIo(server.as_raw_handle());
+        if self.server.take().is_some() {
+            // Cancel pending overlapped accept/read/write operations, keeping the
+            // shared handle alive until their owning threads finish draining them.
+            if let Some(pipe) = &self.pipe {
+                unsafe {
+                    windows_sys::Win32::System::IO::CancelIoEx(
+                        pipe.as_raw_handle(),
+                        std::ptr::null(),
+                    );
+                }
             }
             if self
                 .server_done

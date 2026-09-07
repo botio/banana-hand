@@ -5,6 +5,12 @@ use std::{
     thread,
 };
 
+#[cfg(target_os = "windows")]
+use std::{
+    os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle},
+    sync::Arc,
+};
+
 // Unix desktop responses are newline-framed; keep one reader for the session.
 // Windows reads whole messages from a message-mode pipe instead.
 #[cfg(unix)]
@@ -18,7 +24,6 @@ use serde_json::{Value, json};
 use thiserror::Error;
 
 const MAX_NATIVE_MESSAGE_BYTES: usize = 1_048_576;
-#[cfg(target_os = "windows")]
 /// Message-mode pipe buffers are sized to hold the largest single message in
 /// one Read/Write, so framing stays one-object-per-call.
 #[cfg(target_os = "windows")]
@@ -113,8 +118,7 @@ enum DesktopTransport {
     #[cfg(unix)]
     Unix(std::os::unix::net::UnixStream),
     #[cfg(target_os = "windows")]
-    #[allow(dead_code)]
-    Pipe(windows_sys::Win32::Foundation::HANDLE),
+    Pipe(Arc<OwnedHandle>),
 }
 
 impl Clone for DesktopTransport {
@@ -123,18 +127,12 @@ impl Clone for DesktopTransport {
             #[cfg(unix)]
             Self::Unix(stream) => Self::Unix(stream.try_clone().expect("clone socket")),
             #[cfg(target_os = "windows")]
-            Self::Pipe(handle) => Self::Pipe(*handle),
+            Self::Pipe(handle) => Self::Pipe(Arc::clone(handle)),
             #[cfg(not(any(unix, windows)))]
             _ => unreachable!(),
         }
     }
 }
-
-// A Windows named pipe `HANDLE` is a process-wide value (not thread-local), so
-// moving the handle between threads is safe. Unix sockets are already Send, so
-// the impl is only needed on Windows.
-#[cfg(target_os = "windows")]
-unsafe impl Send for DesktopTransport {}
 
 impl DesktopTransport {
     fn connect(config: &NativeHostBridgeConfig) -> Result<Self, HostError> {
@@ -153,7 +151,7 @@ impl DesktopTransport {
                 HostError::BridgeConfig(io::Error::other("bridge config has no named-pipe name"))
             })?;
             let handle = open_named_pipe(name)?;
-            Ok(Self::Pipe(handle))
+            Ok(Self::Pipe(Arc::new(handle)))
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -179,7 +177,7 @@ impl DesktopTransport {
         #[cfg(target_os = "windows")]
         {
             let handle = match self {
-                Self::Pipe(handle) => *handle,
+                Self::Pipe(handle) => handle,
             };
             pipe_write(handle, bytes)
         }
@@ -205,7 +203,7 @@ impl DesktopTransport {
         #[cfg(target_os = "windows")]
         {
             let handle = match self {
-                Self::Pipe(handle) => *handle,
+                Self::Pipe(handle) => handle,
             };
             let line = pipe_read_message(handle)?.ok_or_else(|| {
                 HostError::BridgeUnavailable(io::Error::other("desktop closed without a response"))
@@ -226,10 +224,13 @@ impl DesktopTransport {
 }
 
 #[cfg(target_os = "windows")]
-fn open_named_pipe(name: &str) -> Result<windows_sys::Win32::Foundation::HANDLE, HostError> {
+fn open_named_pipe(name: &str) -> Result<OwnedHandle, HostError> {
     use windows_sys::Win32::{
         Foundation::{GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE},
-        Storage::FileSystem::{CreateFileW, FILE_ATTRIBUTE_NORMAL, OPEN_EXISTING},
+        Storage::FileSystem::{
+            CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_FLAG_OVERLAPPED, OPEN_EXISTING,
+        },
+        System::Pipes::{PIPE_READMODE_MESSAGE, SetNamedPipeHandleState},
     };
     let wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
     let handle = unsafe {
@@ -239,62 +240,127 @@ fn open_named_pipe(name: &str) -> Result<windows_sys::Win32::Foundation::HANDLE,
             0,
             std::ptr::null(),
             OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL,
+            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED,
             std::ptr::null_mut(),
         )
     };
     if handle == INVALID_HANDLE_VALUE {
-        return Err(HostError::BridgeUnavailable(io::Error::other(
-            "named pipe connect failed",
-        )));
+        return Err(HostError::BridgeUnavailable(io::Error::last_os_error()));
+    }
+    let handle = unsafe { OwnedHandle::from_raw_handle(handle) };
+    // The desktop writes one JSON message per WriteFile; read exactly one
+    // message per ReadFile so a byte-mode read can never split or merge them.
+    let mode = PIPE_READMODE_MESSAGE;
+    let ok = unsafe {
+        SetNamedPipeHandleState(
+            handle.as_raw_handle(),
+            &mode,
+            std::ptr::null(),
+            std::ptr::null(),
+        )
+    };
+    if ok == 0 {
+        return Err(HostError::BridgeUnavailable(io::Error::last_os_error()));
     }
     Ok(handle)
 }
 
 #[cfg(target_os = "windows")]
-fn pipe_write(
-    handle: windows_sys::Win32::Foundation::HANDLE,
-    bytes: &[u8],
-) -> Result<(), HostError> {
-    use windows_sys::Win32::Storage::FileSystem::WriteFile;
-    let mut written = 0_u32;
+/// Issue one overlapped I/O and wait inline for its completion. The reader and
+/// writer threads share one handle, so I/O must be overlapped: synchronous
+/// ReadFile and WriteFile on the same handle serialize, deadlocking the moment
+/// both the read and the write are pending. The borrowed pipe, operation buffer,
+/// OVERLAPPED, and owned event stay alive until the operation completes.
+fn overlapped_io(
+    handle: &OwnedHandle,
+    issue: impl FnOnce(&mut windows_sys::Win32::System::IO::OVERLAPPED) -> i32,
+) -> io::Result<u32> {
+    use windows_sys::Win32::{
+        Foundation::ERROR_IO_PENDING,
+        System::IO::{GetOverlappedResult, OVERLAPPED},
+        System::Threading::CreateEventW,
+    };
+    let event = unsafe { CreateEventW(std::ptr::null(), 1, 0, std::ptr::null()) };
+    if event.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    let event = unsafe { OwnedHandle::from_raw_handle(event) };
+    let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
+    overlapped.hEvent = event.as_raw_handle();
+
+    if issue(&mut overlapped) == 0 {
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() != Some(ERROR_IO_PENDING as i32) {
+            return Err(error);
+        }
+    }
+
+    let mut transferred = 0_u32;
     let ok = unsafe {
-        WriteFile(
-            handle,
-            bytes.as_ptr(),
-            bytes.len() as u32,
-            &mut written,
-            std::ptr::null_mut(),
-        )
+        GetOverlappedResult(handle.as_raw_handle(), &mut overlapped, &mut transferred, 1)
     };
     if ok == 0 {
-        return Err(HostError::BridgeUnavailable(io::Error::other(
-            "named pipe write failed",
+        return Err(io::Error::last_os_error());
+    }
+    Ok(transferred)
+}
+
+#[cfg(target_os = "windows")]
+fn pipe_write(handle: &OwnedHandle, bytes: &[u8]) -> Result<(), HostError> {
+    use windows_sys::Win32::Storage::FileSystem::WriteFile;
+    let length = u32::try_from(bytes.len()).map_err(|_| {
+        HostError::BridgeUnavailable(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "named pipe message is too large",
+        ))
+    })?;
+    let written = overlapped_io(handle, |overlapped| unsafe {
+        WriteFile(
+            handle.as_raw_handle(),
+            bytes.as_ptr(),
+            length,
+            std::ptr::null_mut(),
+            overlapped,
+        )
+    })
+    .map_err(HostError::BridgeUnavailable)?;
+    if written != length {
+        return Err(HostError::BridgeUnavailable(io::Error::new(
+            io::ErrorKind::WriteZero,
+            "named pipe write did not send the complete message",
         )));
     }
     Ok(())
 }
 
 #[cfg(target_os = "windows")]
-fn pipe_read_message(
-    handle: windows_sys::Win32::Foundation::HANDLE,
-) -> Result<Option<String>, HostError> {
-    use windows_sys::Win32::{Foundation::CloseHandle, Storage::FileSystem::ReadFile};
+fn pipe_read_message(handle: &OwnedHandle) -> Result<Option<String>, HostError> {
+    use windows_sys::Win32::{
+        Foundation::{ERROR_BROKEN_PIPE, ERROR_NO_DATA, ERROR_PIPE_NOT_CONNECTED},
+        Storage::FileSystem::ReadFile,
+    };
     let mut buffer = vec![0_u8; PIPE_BUFFER_BYTES];
-    let mut read = 0_u32;
-    let ok = unsafe {
+    let read = match overlapped_io(handle, |overlapped| unsafe {
         ReadFile(
-            handle,
+            handle.as_raw_handle(),
             buffer.as_mut_ptr(),
             buffer.len() as u32,
-            &mut read,
             std::ptr::null_mut(),
+            overlapped,
         )
-    };
-    if ok == 0 || read == 0 {
-        unsafe {
-            CloseHandle(handle);
+    }) {
+        Ok(read) => read,
+        Err(error)
+            if matches!(
+                error.raw_os_error().map(|code| code as u32),
+                Some(ERROR_BROKEN_PIPE | ERROR_NO_DATA | ERROR_PIPE_NOT_CONNECTED)
+            ) =>
+        {
+            return Ok(None);
         }
+        Err(error) => return Err(HostError::BridgeUnavailable(error)),
+    };
+    if read == 0 {
         return Ok(None);
     }
     let message = String::from_utf8_lossy(&buffer[..read as usize]);
@@ -378,7 +444,7 @@ fn read_desktop_messages(
             .read_line(&mut line)
             .map_err(HostError::BridgeUnavailable)?;
         #[cfg(target_os = "windows")]
-        let length = match pipe_read_message(handle)? {
+        let length = match pipe_read_message(&handle)? {
             Some(message) => {
                 line = message;
                 line.len()

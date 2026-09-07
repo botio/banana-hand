@@ -55,6 +55,8 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
+      - uses: Swatinem/rust-cache@v2
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -79,6 +81,20 @@ jobs:
       - name: Exercise idle readers through real native messaging
         timeout-minutes: 20
         run: cargo test --locked -p banana-hand --target x86_64-pc-windows-msvc windows_tests -- --nocapture --test-threads=1
+
+      - name: Build desktop with embedded frontend
+        run: cargo build --locked -p banana-hand --target x86_64-pc-windows-msvc --features tauri/custom-protocol
+
+      - run: npx playwright install chromium
+
+      - name: Exercise real browser foreground dispatch
+        run: node scripts/verify-windows-browser.mjs target/x86_64-pc-windows-msvc/debug/banana-hand.exe "${{ runner.temp }}/source-browser-smoke"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-source-browser-smoke
+          path: ${{ runner.temp }}/source-browser-smoke
 
   installed-browser:
     if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''

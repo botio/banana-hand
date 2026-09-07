@@ -217,12 +217,10 @@ fn accept_named_pipes(
             continue;
         };
         first_instance = false;
-        if connect_named_pipe(pipe) {
+        if connect_named_pipe(&pipe).is_ok() {
             let coordinator = coordinator.clone();
             let capability_token = capability_token.clone();
             thread::spawn(move || serve_pipe(pipe, coordinator, capability_token));
-        } else {
-            close_pipe(pipe);
         }
     }
 }
@@ -234,13 +232,14 @@ fn serve_pipe(
     capability_token: String,
 ) {
     let (writer, receiver) = std::sync::mpsc::channel::<Value>();
+    let writer_pipe = Arc::clone(&pipe);
     thread::spawn(move || {
         for response in receiver {
             let Ok(encoded) = serde_json::to_string(&HostBridgeResponse { response }) else {
                 continue;
             };
             let line = format!("{encoded}\n");
-            if !pipe_write(pipe, line.as_bytes()) {
+            if !pipe_write(&writer_pipe, line.as_bytes()) {
                 break;
             }
         }
@@ -248,7 +247,7 @@ fn serve_pipe(
 
     let mut registered_key: Option<String> = None;
     loop {
-        let Some(message) = pipe_read_message(pipe) else {
+        let Some(message) = pipe_read_message(&pipe) else {
             break;
         };
         let lossy = String::from_utf8_lossy(&message);
@@ -262,7 +261,6 @@ fn serve_pipe(
             break;
         }
     }
-    close_pipe(pipe);
     // The browser session is gone: drop its port registration and the tabs it
     // reported so the App never offers stale targets.
     if let Some(key) = &registered_key {
@@ -333,11 +331,17 @@ fn handle_message(
                 coordinator.browser_ports.insert(key.clone(), host_sender);
                 coordinator.last_bridge_rejection = None;
                 coordinator.last_host_disconnect_reason = hello.last_disconnect_reason;
-                (json!({ "type": "ack", "protocol_major": PROTOCOL_MAJOR }), Some(key))
+                (
+                    json!({ "type": "ack", "protocol_major": PROTOCOL_MAJOR }),
+                    Some(key),
+                )
             }
             Ok(_) => {
                 record_rejection(coordinator, "protocol_mismatch");
-                (json!({ "type": "error", "code": "protocol_mismatch" }), None)
+                (
+                    json!({ "type": "error", "code": "protocol_mismatch" }),
+                    None,
+                )
             }
             Err(error) => {
                 record_rejection(coordinator, "invalid_message");
@@ -367,7 +371,10 @@ fn handle_message(
                         .connected_tabs
                         .insert(target_key(&tab.target), tab);
                 }
-                (json!({ "type": "ack", "protocol_major": PROTOCOL_MAJOR }), None)
+                (
+                    json!({ "type": "ack", "protocol_major": PROTOCOL_MAJOR }),
+                    None,
+                )
             }
             Ok(_) => {
                 record_rejection(coordinator, "invalid_message");
@@ -390,7 +397,10 @@ fn handle_message(
                 if let Some(sender) = pending {
                     let _ = sender.send(prepared);
                 }
-                (json!({ "type": "ack", "protocol_major": PROTOCOL_MAJOR }), None)
+                (
+                    json!({ "type": "ack", "protocol_major": PROTOCOL_MAJOR }),
+                    None,
+                )
             }
             Ok(_) => {
                 record_rejection(coordinator, "invalid_message");
@@ -432,33 +442,34 @@ pub(crate) fn connection_key_for_target(target: &TabTarget) -> String {
 
 #[cfg(target_os = "windows")]
 mod named_pipe {
+    use std::{
+        io,
+        os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle},
+        sync::Arc,
+    };
     use windows_sys::Win32::{
-        Foundation::{CloseHandle, GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE},
+        Foundation::{ERROR_IO_PENDING, ERROR_PIPE_CONNECTED, GetLastError, INVALID_HANDLE_VALUE},
         Storage::FileSystem::{
-            CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_FLAG_FIRST_PIPE_INSTANCE, OPEN_EXISTING,
-            PIPE_ACCESS_DUPLEX, ReadFile, WriteFile,
+            FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX, ReadFile,
+            WriteFile,
         },
+        System::IO::{GetOverlappedResult, OVERLAPPED},
         System::Pipes::{
             ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_MESSAGE, PIPE_TYPE_MESSAGE,
             PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
         },
+        System::Threading::CreateEventW,
     };
 
     const PIPE_BUFFER_BYTES: usize = 2 * 1024 * 1024;
 
-    /// A named pipe handle. `HANDLE` is a raw pointer (`*mut c_void`), which is
-    /// `!Send`, but a Windows handle is a process-wide value, not thread-local,
-    /// so moving the handle between threads is safe. The value is `Copy` so it
-    /// can be shared across the connect/serve/close call sites.
-    #[derive(Clone, Copy)]
-    #[repr(transparent)]
-    pub(super) struct PipeHandle(windows_sys::Win32::Foundation::HANDLE);
-    unsafe impl Send for PipeHandle {}
+    pub(super) type PipeHandle = Arc<OwnedHandle>;
 
     pub(super) fn create_named_pipe(wide: &[u16], first: bool) -> Option<PipeHandle> {
         // `dwOpenMode` takes PIPE_ACCESS_* access modes and FILE_FLAG_* flags,
         // not the GENERIC_READ/GENERIC_WRITE access mask that CreateFileW uses.
         let flags = PIPE_ACCESS_DUPLEX
+            | FILE_FLAG_OVERLAPPED
             | if first {
                 FILE_FLAG_FIRST_PIPE_INSTANCE
             } else {
@@ -476,75 +487,95 @@ mod named_pipe {
                 std::ptr::null(),
             )
         };
-        (handle != INVALID_HANDLE_VALUE).then_some(PipeHandle(handle))
+        (handle != INVALID_HANDLE_VALUE)
+            .then(|| Arc::new(unsafe { OwnedHandle::from_raw_handle(handle) }))
     }
 
-    pub(super) fn connect_named_pipe(handle: PipeHandle) -> bool {
-        unsafe { ConnectNamedPipe(handle.0, std::ptr::null_mut()) != 0 }
-    }
-
-    pub(super) fn close_pipe(handle: PipeHandle) {
-        unsafe {
-            CloseHandle(handle.0);
+    pub(super) fn connect_named_pipe(handle: &OwnedHandle) -> io::Result<()> {
+        match overlapped_io(handle, |overlapped| unsafe {
+            ConnectNamedPipe(handle.as_raw_handle(), overlapped)
+        }) {
+            Ok(_) => Ok(()),
+            Err(error) if error.raw_os_error() == Some(ERROR_PIPE_CONNECTED as i32) => Ok(()),
+            Err(error) => Err(error),
         }
     }
 
-    pub(super) fn pipe_read_message(handle: PipeHandle) -> Option<Vec<u8>> {
-        let mut buffer = vec![0_u8; PIPE_BUFFER_BYTES];
-        let mut read = 0_u32;
+    /// Issue one overlapped I/O and wait inline for its completion. The reader
+    /// and writer threads share one handle, so I/O must be overlapped:
+    /// synchronous ReadFile and WriteFile on the same handle serialize,
+    /// deadlocking the moment both the read and write are pending. Each call
+    /// keeps its own event and OVERLAPPED alive until the operation is terminal.
+    fn overlapped_io(
+        handle: &OwnedHandle,
+        issue: impl FnOnce(&mut OVERLAPPED) -> i32,
+    ) -> io::Result<u32> {
+        let event = unsafe { CreateEventW(std::ptr::null(), 1, 0, std::ptr::null()) };
+        if event.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        let event = unsafe { OwnedHandle::from_raw_handle(event) };
+        let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
+        overlapped.hEvent = event.as_raw_handle();
+
+        let immediate = issue(&mut overlapped);
+        if immediate == 0 {
+            let error = unsafe { GetLastError() };
+            if error != ERROR_IO_PENDING {
+                return Err(io::Error::from_raw_os_error(error as i32));
+            }
+        }
+
+        let mut transferred = 0_u32;
         let ok = unsafe {
+            GetOverlappedResult(handle.as_raw_handle(), &overlapped, &mut transferred, 1)
+        };
+        if ok == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(transferred)
+    }
+
+    pub(super) fn pipe_read_message(handle: &OwnedHandle) -> Option<Vec<u8>> {
+        let mut buffer = vec![0_u8; PIPE_BUFFER_BYTES];
+        let read = overlapped_io(handle, |overlapped| unsafe {
             ReadFile(
-                handle.0,
+                handle.as_raw_handle(),
                 buffer.as_mut_ptr(),
                 buffer.len() as u32,
-                &mut read,
                 std::ptr::null_mut(),
+                overlapped,
             )
-        };
-        if ok == 0 || read == 0 {
+        })
+        .ok()?;
+        if read == 0 {
             return None;
         }
         buffer.truncate(read as usize);
         Some(buffer)
     }
 
-    pub(super) fn pipe_write(handle: PipeHandle, bytes: &[u8]) -> bool {
-        let mut written = 0_u32;
-        let ok = unsafe {
-            WriteFile(
-                handle.0,
-                bytes.as_ptr(),
-                bytes.len() as u32,
-                &mut written,
-                std::ptr::null_mut(),
-            )
+    pub(super) fn pipe_write(handle: &OwnedHandle, bytes: &[u8]) -> bool {
+        let Ok(length) = u32::try_from(bytes.len()) else {
+            return false;
         };
-        ok != 0
-    }
-
-    /// Connects to an existing named pipe (used by the native host client).
-    #[allow(dead_code)]
-    pub(super) fn open_existing_pipe(name: &str) -> Option<PipeHandle> {
-        let wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
-        let handle = unsafe {
-            CreateFileW(
-                wide.as_ptr(),
-                (GENERIC_READ | GENERIC_WRITE) as u32,
-                0,
-                std::ptr::null(),
-                OPEN_EXISTING,
-                FILE_ATTRIBUTE_NORMAL,
-                std::ptr::null_mut(),
-            )
-        };
-        (handle != INVALID_HANDLE_VALUE).then_some(PipeHandle(handle))
+        matches!(
+            overlapped_io(handle, |overlapped| unsafe {
+                WriteFile(
+                    handle.as_raw_handle(),
+                    bytes.as_ptr(),
+                    length,
+                    std::ptr::null_mut(),
+                    overlapped,
+                )
+            }),
+            Ok(written) if written == length
+        )
     }
 }
 
 #[cfg(target_os = "windows")]
-use named_pipe::{
-    close_pipe, connect_named_pipe, create_named_pipe, pipe_read_message, pipe_write,
-};
+use named_pipe::{connect_named_pipe, create_named_pipe, pipe_read_message, pipe_write};
 
 #[cfg(unix)]
 #[cfg(test)]

@@ -43,7 +43,7 @@ const watchdog = setTimeout(() => {
 async function finish() {
   clearTimeout(watchdog);
   if (app) {
-    await app.screenshot({ path: path.join(diagnostics, "dispatch.png") }).catch(() => {});
+    await app.screenshot({ path: path.join(diagnostics, "dispatch.png"), timeout: 3000 }).catch(() => {});
     logs.push(`Desktop result: ${await app.locator("#result").textContent({ timeout: 1000 }).catch(() => "unavailable")}`);
   }
   await writeFile(path.join(diagnostics, "browser-smoke.log"), logs.join("\n"));
@@ -59,6 +59,7 @@ async function finish() {
 
 try {
   desktop = spawn(path.resolve(executable), [], {
+    cwd: path.dirname(path.resolve(executable)),
     env: {
       ...process.env,
       WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: "--remote-debugging-port=9222",
@@ -69,14 +70,18 @@ try {
   desktop.stdout.on("data", data => logs.push(`desktop stdout: ${data}`));
   desktop.stderr.on("data", data => logs.push(`desktop stderr: ${data}`));
   const deadline = Date.now() + 30_000;
+  let connectionError;
   while (Date.now() < deadline) {
     assert.equal(desktop.exitCode, null, "desktop exited before WebView2 became ready");
     try {
       webview = await chromium.connectOverCDP("http://127.0.0.1:9222", { timeout: 1000 });
       break;
-    } catch { await delay(200); }
+    } catch (error) {
+      connectionError = error;
+      await delay(200);
+    }
   }
-  assert.ok(webview, "WebView2 CDP did not become available");
+  assert.ok(webview, `WebView2 CDP did not become available: ${connectionError}`);
   await expect.poll(() => webview.contexts().flatMap(context => context.pages()).length).toBeGreaterThan(0);
   app = webview.contexts().flatMap(context => context.pages())[0];
   await app.locator("#dispatch").waitFor();
