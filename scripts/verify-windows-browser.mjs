@@ -25,11 +25,9 @@ const server = createServer((request, response) => {
   response.end(`<!doctype html><title>Banana smoke ${name}</title><h1>${name}</h1><output id="keys">0</output><script>
     window.receivedKeys = [];
     addEventListener('keydown', event => {
-      if (event.code === 'F8') {
-        event.preventDefault();
-        receivedKeys.push({code:event.code, trusted:event.isTrusted});
-        document.querySelector('#keys').textContent = receivedKeys.length;
-      }
+      event.preventDefault();
+      receivedKeys.push({key:event.key, code:event.code, trusted:event.isTrusted});
+      document.querySelector('#keys').textContent = receivedKeys.length;
     });
   </script>`);
 });
@@ -156,7 +154,7 @@ try {
   }))));
   logs.push(`Page state after dispatch: ${JSON.stringify(await pageState())}`);
   await expect.poll(async () => (await pageState()).map(state => state.keys), { timeout: 5000 })
-    .toEqual([[{ code: "F8", trusted: true }], [{ code: "F8", trusted: true }]]);
+    .toEqual([[{ key: "F8", code: "F8", trusted: true }], [{ key: "F8", code: "F8", trusted: true }]]);
   logs.push("PASS: both real Chromium tabs observed exactly one trusted F8 from installed desktop dispatch");
   console.log(logs.join("\n"));
 } catch (error) {
