@@ -126,12 +126,11 @@ try {
   const second = await browserContext.newPage();
   await first.goto(`${origin}/first`);
   await second.goto(`${origin}/second`);
-  logs.push(`Initial page focus: ${JSON.stringify(await Promise.all([first, second].map(page => page.evaluate(() => ({ focused: document.hasFocus(), element: document.activeElement.tagName })))) )}`);
   await expect(app.locator("#first-target option").filter({ hasText: "Banana smoke first" })).toHaveCount(1, { timeout: 30_000 });
   const firstValue = await app.locator("#first-target option").filter({ hasText: "Banana smoke first" }).getAttribute("value");
   const secondValue = await app.locator("#second-target option").filter({ hasText: "Banana smoke second" }).getAttribute("value");
   assert.ok(firstValue && secondValue);
-  logs.push("PASS: real extension hello and both tab snapshots reached installed desktop");
+  logs.push("PASS: real extension hello and both tab snapshots reached desktop");
 
   await app.getByRole("textbox", { name: "快捷鍵名稱" }).fill("Windows smoke F8");
   await app.getByRole("button", { name: "快捷鍵組合" }).click();
@@ -149,13 +148,11 @@ try {
   logs.push(`Dispatch result: ${result}`);
   assert.ok(!result.includes("逾時"), `Foreground preparation timed out: ${result}`);
   assert.ok(result.startsWith("已嘗試發送"), `Dispatch rejected: ${result}`);
-  const pageState = () => Promise.all([first, second].map(page => page.evaluate(() => ({
-    keys: receivedKeys, focused: document.hasFocus(), element: document.activeElement.tagName,
-  }))));
-  logs.push(`Page state after dispatch: ${JSON.stringify(await pageState())}`);
-  await expect.poll(async () => (await pageState()).map(state => state.keys), { timeout: 5000 })
+  const pageKeys = () => Promise.all([first, second].map(page => page.evaluate(() => receivedKeys)));
+  logs.push(`Page keys after dispatch: ${JSON.stringify(await pageKeys())}`);
+  await expect.poll(pageKeys, { timeout: 5000 })
     .toEqual([[{ key: "F8", code: "F8", trusted: true }], [{ key: "F8", code: "F8", trusted: true }]]);
-  logs.push("PASS: both real Chromium tabs observed exactly one trusted F8 from installed desktop dispatch");
+  logs.push("PASS: both real Chromium tabs observed exactly one trusted F8 from desktop dispatch");
   console.log(logs.join("\n"));
 } catch (error) {
   logs.push(error.stack ?? String(error));

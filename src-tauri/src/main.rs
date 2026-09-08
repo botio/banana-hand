@@ -167,11 +167,25 @@ fn request_dispatch(
         .input_adapter
         .activate(&request.second_target.browser)
         .map_err(|error| error.to_string())?;
-    let second_prepare = prepare_target(
+    let second_prepare = match prepare_target(
         &state.coordinator,
         &request.second_target,
         &request.request_id,
-    )?;
+    ) {
+        Ok(prepared) => prepared,
+        Err(detail) => {
+            return Ok(DispatchOutcome::Partial {
+                attempts: vec![
+                    first_attempt,
+                    DispatchAttempt {
+                        target: request.second_target,
+                        status: AttemptStatus::NotDelivered,
+                        detail,
+                    },
+                ],
+            });
+        }
+    };
     if !second_prepare.ready {
         return Ok(DispatchOutcome::Partial {
             attempts: vec![

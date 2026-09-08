@@ -19,6 +19,7 @@ on:
       - "package*.json"
       - "tsconfig.json"
       - "vite.config.ts"
+      - "scripts/verify-windows-browser.mjs"
       - ".github/workflows/windows-bridge.yml"
   push:
     paths:
@@ -32,6 +33,7 @@ on:
       - "package*.json"
       - "tsconfig.json"
       - "vite.config.ts"
+      - "scripts/verify-windows-browser.mjs"
       - ".github/workflows/windows-bridge.yml"
 
 permissions:

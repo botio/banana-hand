@@ -193,7 +193,7 @@ Chrome／Firefox 的 installer 登錄位置必須依官方文件寫入。Brave �
 |---|---|---|---|
 | Linux X11 | Unix socket（`$XDG_RUNTIME_DIR/banana-hand/`，0700） | XTEST | 已驗證（本機） |
 | Linux Wayland | 同上 | **fail-closed**：`PortalPermissionRequired` | spec-only，見下 |
-| Windows | named pipe（`%LOCALAPPDATA%\Banana Hand\runtime\`，per-pid pipe） | `SendInput` event stream（送前驗證前景窗口） | 橋接已驗證（Windows CI）；注入 實機待驗 |
+| Windows | named pipe（`%LOCALAPPDATA%\Banana Hand\runtime\`，per-pid pipe） | `SendInput` event stream（送前驗證前景窗口） | Windows CI 已驗證 Chromium 兩分頁 F8；完整實機矩陣待驗 |
 | macOS Apple Silicon | Unix socket（`~/Library/Caches/Banana Hand/runtime`，0700） | CGEvent（Accessibility 提示 + 前景窗口驗證） | 實機待驗（ad-hoc DMG + xattr 清除隔離 + 授 Accessibility） |
 
 - **Linux Wayland**：portal 注入是 spec-only。`XDG_SESSION_TYPE=wayland` 時維持
@@ -207,8 +207,12 @@ Chrome／Firefox 的 installer 登錄位置必須依官方文件寫入。Brave �
   橋接已由 `.github/workflows/windows-bridge.yml` 在真實 Windows runner 上驗證：
   以實際 native host 與實際 Chromium extension 完成 hello／分頁快照／`prepare`↔`prepared`
   往返，並以 overlapped I/O 讓同一 handle 的讀寫可同時進行（同步 I/O 會在讀寫皆掛起時死鎖）。
-  真實 Chromium smoke 的前景閘門仍回報 `banana-hand.exe`，因此尚未證明 `SendInput` 送達；
-  前景切換失敗原因未確認，不能直接歸因於 CI 環境。
+  Chrome 前景切換須由 App 以 `AllowSetForegroundWindow` 授權該連線對應的 Chrome 程序；
+  只移出 UI 執行緒無法修復，因此維持同步發送。`SendInput` 同時提供虛擬鍵碼與掃描碼，
+  避免 Chromium 的 `KeyboardEvent.code` 為空。真實 Windows runner 的
+  [兩分頁回歸](https://github.com/botio/banana-hand/actions/runs/34187412844)已確認每個分頁
+  恰好收到一次 `key: F8`、`code: F8`、`isTrusted: true`，並保留前景桌面截圖。
+  此證據來自測試用 CDP 建置，不等同所有已安裝 release／browser 配對的正式支援。
   先前「須 mingw-w64 才能建完整 App」的限制已解除：CI 直接在 windows-latest 原生建置。
 - **macOS**：Unix-socket bridge 已指向 macOS 使用者專屬 cache 目錄（0700），
   CGEvent 會先查 Accessibility；ad-hoc、未 notarize 的 DMG 首次開啟需先以

@@ -547,7 +547,11 @@ mod named_pipe {
                 .iter()
                 .position(|&unit| unit == 0)
                 .unwrap_or(entry.szExeFile.len());
-            if String::from_utf16_lossy(&entry.szExeFile[..end]).eq_ignore_ascii_case("chrome.exe")
+            let executable = &entry.szExeFile[..end];
+            if executable.len() == b"chrome.exe".len()
+                && executable.iter().zip(b"chrome.exe").all(|(&unit, &ascii)| {
+                    unit == u16::from(ascii) || unit == u16::from(ascii.to_ascii_uppercase())
+                })
             {
                 let handle =
                     unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
