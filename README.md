@@ -207,7 +207,8 @@ Chrome／Firefox 的 installer 登錄位置必須依官方文件寫入。Brave �
   橋接已由 `.github/workflows/windows-bridge.yml` 在真實 Windows runner 上驗證：
   以實際 native host 與實際 Chromium extension 完成 hello／分頁快照／`prepare`↔`prepared`
   往返，並以 overlapped I/O 讓同一 handle 的讀寫可同時進行（同步 I/O 會在讀寫皆掛起時死鎖）。
-  `SendInput` 注入與前景驗證仍待真實互動式工作階段證明（CI 的非互動視窗焦點語意無法重現）。
+  真實 Chromium smoke 的前景閘門仍回報 `banana-hand.exe`，因此尚未證明 `SendInput` 送達；
+  前景切換失敗原因未確認，不能直接歸因於 CI 環境。
   先前「須 mingw-w64 才能建完整 App」的限制已解除：CI 直接在 windows-latest 原生建置。
 - **macOS**：Unix-socket bridge 已指向 macOS 使用者專屬 cache 目錄（0700），
   CGEvent 會先查 Accessibility；ad-hoc、未 notarize 的 DMG 首次開啟需先以

@@ -119,6 +119,10 @@ jobs:
         if: matrix.target == 'x86_64-pc-windows-msvc'
         run: cargo test -p banana-hand --target ${{ matrix.target }} native_host
 
+      - name: Verify Windows release host bidirectional preparation
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        run: cargo test --locked -p banana-hand --release --target ${{ matrix.target }} windows_tests -- --nocapture --test-threads=1
+
       - name: Smoke-test installed Windows startup and browser discovery
         if: matrix.target == 'x86_64-pc-windows-msvc'
         shell: pwsh
@@ -134,7 +138,7 @@ jobs:
             -StartupTimeoutSeconds 90
 
       - name: Upload Windows smoke diagnostics
-        if: failure() && matrix.target == 'x86_64-pc-windows-msvc'
+        if: always() && matrix.target == 'x86_64-pc-windows-msvc'
         uses: actions/upload-artifact@v4
         with:
           name: banana-hand-windows-smoke-diagnostics
