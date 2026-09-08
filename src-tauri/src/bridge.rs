@@ -255,6 +255,12 @@ fn serve_pipe(
         let (response, connection_key) =
             dispatch_inbound(&coordinator, line, &capability_token, writer.clone());
         if let Some(key) = connection_key {
+            if let Some(process) = named_pipe::chrome_process(&pipe) {
+                coordinator
+                    .lock()
+                    .chrome_processes
+                    .insert(key.clone(), Arc::new(process));
+            }
             registered_key = Some(key);
         }
         if writer.send(response).is_err() {
@@ -266,6 +272,7 @@ fn serve_pipe(
     if let Some(key) = &registered_key {
         let mut coordinator = coordinator.lock();
         coordinator.browser_ports.remove(key);
+        coordinator.chrome_processes.remove(key);
         let prefix = format!("{key}:");
         coordinator
             .connected_tabs
@@ -441,6 +448,46 @@ pub(crate) fn connection_key_for_target(target: &TabTarget) -> String {
 }
 
 #[cfg(target_os = "windows")]
+pub(crate) fn allow_chrome_foreground(
+    coordinator: &Arc<Mutex<DispatchCoordinator>>,
+    target: &TabTarget,
+) -> Result<(), String> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::{
+        System::Threading::GetProcessId,
+        UI::WindowsAndMessaging::{
+            AllowSetForegroundWindow, GetForegroundWindow, GetWindowThreadProcessId,
+        },
+    };
+    if target.browser != BrowserKind::Chrome {
+        return Ok(());
+    }
+    let process = coordinator
+        .lock()
+        .chrome_processes
+        .get(&connection_key_for_target(target))
+        .cloned();
+    let Some(process) = process else {
+        return Ok(());
+    };
+    let process_id = unsafe { GetProcessId(process.as_raw_handle()) };
+    let mut foreground_id = 0;
+    unsafe {
+        GetWindowThreadProcessId(GetForegroundWindow(), &mut foreground_id);
+    }
+    if foreground_id == process_id {
+        return Ok(());
+    }
+    if unsafe { AllowSetForegroundWindow(process_id) } == 0 {
+        return Err(format!(
+            "無法授權 Chrome 切換前景：{}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
 mod named_pipe {
     use std::{
         io,
@@ -464,6 +511,56 @@ mod named_pipe {
     const PIPE_BUFFER_BYTES: usize = 2 * 1024 * 1024;
 
     pub(super) type PipeHandle = Arc<OwnedHandle>;
+
+    // Resolve only the Chrome ancestor of this OS-authenticated pipe peer.
+    // Holding its process handle prevents the saved PID from being recycled.
+    pub(super) fn chrome_process(pipe: &OwnedHandle) -> Option<OwnedHandle> {
+        use windows_sys::Win32::System::{
+            Diagnostics::ToolHelp::{
+                CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
+                TH32CS_SNAPPROCESS,
+            },
+            Pipes::GetNamedPipeClientProcessId,
+            Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
+        };
+        let mut process_id = 0;
+        if unsafe { GetNamedPipeClientProcessId(pipe.as_raw_handle(), &mut process_id) } == 0 {
+            return None;
+        }
+        let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+        if snapshot == INVALID_HANDLE_VALUE {
+            return None;
+        }
+        let snapshot = unsafe { OwnedHandle::from_raw_handle(snapshot) };
+        for _ in 0..8 {
+            let mut entry: PROCESSENTRY32W = unsafe { std::mem::zeroed() };
+            entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+            let mut found = unsafe { Process32FirstW(snapshot.as_raw_handle(), &mut entry) };
+            while found != 0 && entry.th32ProcessID != process_id {
+                found = unsafe { Process32NextW(snapshot.as_raw_handle(), &mut entry) };
+            }
+            if found == 0 || process_id == 0 {
+                return None;
+            }
+            let end = entry
+                .szExeFile
+                .iter()
+                .position(|&unit| unit == 0)
+                .unwrap_or(entry.szExeFile.len());
+            if String::from_utf16_lossy(&entry.szExeFile[..end]).eq_ignore_ascii_case("chrome.exe")
+            {
+                let handle =
+                    unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
+                return (!handle.is_null())
+                    .then(|| unsafe { OwnedHandle::from_raw_handle(handle) });
+            }
+            if entry.th32ParentProcessID == process_id {
+                return None;
+            }
+            process_id = entry.th32ParentProcessID;
+        }
+        None
+    }
 
     pub(super) fn create_named_pipe(wide: &[u16], first: bool) -> Option<PipeHandle> {
         // `dwOpenMode` takes PIPE_ACCESS_* access modes and FILE_FLAG_* flags,

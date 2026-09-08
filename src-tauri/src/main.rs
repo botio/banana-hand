@@ -38,6 +38,8 @@ struct AppState {
 #[derive(Default)]
 pub(crate) struct DispatchCoordinator {
     pub(crate) connected_tabs: HashMap<String, TabMetadata>,
+    #[cfg(target_os = "windows")]
+    pub(crate) chrome_processes: HashMap<String, Arc<std::os::windows::io::OwnedHandle>>,
     pub(crate) browser_ports: HashMap<String, Sender<Value>>,
     pub(crate) pending_prepares: HashMap<String, Sender<bridge::PreparedResult>>,
     cooldown_started_at: Option<Instant>,
@@ -136,7 +138,8 @@ fn request_dispatch(
         }
     }
 
-    state.input_adapter
+    state
+        .input_adapter
         .activate(&request.first_target.browser)
         .map_err(|error| error.to_string())?;
     let first_prepare = prepare_target(
@@ -152,7 +155,8 @@ fn request_dispatch(
     // Window activation is asynchronous on macOS/Windows; the previously
     // frontmost app can still receive the injected chord until the switch
     // commits, so wait for the target browser before posting.
-    state.input_adapter
+    state
+        .input_adapter
         .verify_foreground(&request.first_target.browser)
         .map_err(|error| error.to_string())?;
     if let Err(error) = state.input_adapter.send(&request.shortcut.chord) {
@@ -167,7 +171,8 @@ fn request_dispatch(
         detail: "已嘗試以 native input 注入快捷鍵；不保證送達。".into(),
     };
 
-    state.input_adapter
+    state
+        .input_adapter
         .activate(&request.second_target.browser)
         .map_err(|error| error.to_string())?;
     let second_prepare = prepare_target(
@@ -187,7 +192,8 @@ fn request_dispatch(
             ],
         });
     }
-    state.input_adapter
+    state
+        .input_adapter
         .verify_foreground(&request.second_target.browser)
         .map_err(|error| error.to_string())?;
     if let Err(error) = state.input_adapter.send(&request.shortcut.chord) {
@@ -221,6 +227,8 @@ fn prepare_target(
     parent_request_id: &str,
 ) -> Result<bridge::PreparedResult, String> {
     let request_id = format!("{parent_request_id}:{}", target_key(target));
+    #[cfg(target_os = "windows")]
+    bridge::allow_chrome_foreground(coordinator, target)?;
     let (sender, receiver) = std::sync::mpsc::channel();
     let port = {
         let mut coordinator = coordinator.lock();
