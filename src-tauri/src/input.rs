@@ -202,10 +202,14 @@ fn send_windows(chord: &ShortcutChord) -> Result<(), InputError> {
     keys.push(windows_key(&chord.key));
     let mut inputs = Vec::with_capacity(keys.len() * 2);
     for key in &keys {
-        inputs.push(keyboard_input(*key, 0));
+        inputs.push(keyboard_input(*key));
     }
-    for key in keys.iter().rev() {
-        inputs.push(keyboard_input(*key, KEYEVENTF_KEYUP));
+    for index in (0..keys.len()).rev() {
+        let mut release = inputs[index];
+        unsafe {
+            release.Anonymous.ki.dwFlags |= KEYEVENTF_KEYUP;
+        }
+        inputs.push(release);
     }
     let accepted = unsafe {
         SendInput(
@@ -220,9 +224,17 @@ fn send_windows(chord: &ShortcutChord) -> Result<(), InputError> {
 }
 
 #[cfg(target_os = "windows")]
-fn keyboard_input(key: u16, flags: u32) -> windows_sys::Win32::UI::Input::KeyboardAndMouse::INPUT {
+fn keyboard_input(key: u16) -> windows_sys::Win32::UI::Input::KeyboardAndMouse::INPUT {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
+        INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, MAPVK_VK_TO_VSC_EX,
+        MapVirtualKeyW,
+    };
+    // Chromium derives KeyboardEvent.code from the scan code, not wVk.
+    let scan = unsafe { MapVirtualKeyW(u32::from(key), MAPVK_VK_TO_VSC_EX) };
+    let extended = if scan & 0xff00 == 0xe000 {
+        KEYEVENTF_EXTENDEDKEY
+    } else {
+        0
     };
 
     INPUT {
@@ -230,8 +242,8 @@ fn keyboard_input(key: u16, flags: u32) -> windows_sys::Win32::UI::Input::Keyboa
         Anonymous: INPUT_0 {
             ki: KEYBDINPUT {
                 wVk: key,
-                wScan: 0,
-                dwFlags: flags,
+                wScan: (scan & 0xff) as u16,
+                dwFlags: extended,
                 time: 0,
                 dwExtraInfo: 0,
             },
