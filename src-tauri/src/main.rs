@@ -24,8 +24,6 @@ const PREPARE_TIMEOUT: Duration = Duration::from_secs(3);
 
 struct AppState {
     coordinator: Arc<Mutex<DispatchCoordinator>>,
-    // Separate from the coordinator: bridge replies must remain able to lock it.
-    dispatch_in_progress: Mutex<()>,
     input_adapter: PlatformInputAdapter,
     /// The native-host auto-registration outcome, computed once on startup.
     native_host_registration: Mutex<native_host::AutoRegisterResult>,
@@ -103,18 +101,12 @@ fn backup_settings_before_migration(app: tauri::AppHandle) -> Result<(), String>
     Ok(())
 }
 
-// Windows must keep pumping window messages while Chrome takes the foreground.
-#[cfg_attr(target_os = "windows", tauri::command(async))]
-#[cfg_attr(not(target_os = "windows"), tauri::command)]
+#[tauri::command]
 fn request_dispatch(
     state: State<'_, AppState>,
     request: DispatchRequest,
 ) -> Result<DispatchOutcome, String> {
     request.validate().map_err(|error| error.to_string())?;
-    let _dispatch = state
-        .dispatch_in_progress
-        .try_lock()
-        .ok_or("已有發送正在進行；請等待完成")?;
     {
         let coordinator = state.coordinator.lock();
         if coordinator.cooldown_remaining_seconds() > 0 {
@@ -295,7 +287,6 @@ fn main() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(AppState {
             coordinator,
-            dispatch_in_progress: Mutex::new(()),
             input_adapter: PlatformInputAdapter,
             native_host_registration: Mutex::new(native_host::AutoRegisterResult::default()),
             host_self_check: Mutex::new(None),

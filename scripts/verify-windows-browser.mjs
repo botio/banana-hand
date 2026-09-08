@@ -43,6 +43,19 @@ const watchdog = setTimeout(() => {
 async function finish() {
   clearTimeout(watchdog);
   if (app) {
+    try {
+      execFileSync("pwsh", ["-NoProfile", "-Command", `
+        Add-Type -AssemblyName System.Windows.Forms
+        Add-Type -AssemblyName System.Drawing
+        $bounds = [Windows.Forms.SystemInformation]::VirtualScreen
+        $bitmap = [Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
+        $graphics = [Drawing.Graphics]::FromImage($bitmap)
+        try {
+          $graphics.CopyFromScreen($bounds.Left, $bounds.Top, 0, 0, $bitmap.Size)
+          $bitmap.Save($env:BANANA_SMOKE_SCREENSHOT, [Drawing.Imaging.ImageFormat]::Png)
+        } finally { $graphics.Dispose(); $bitmap.Dispose() }
+      `], { env: { ...process.env, BANANA_SMOKE_SCREENSHOT: path.join(diagnostics, "foreground.png") }, timeout: 5000 });
+    } catch (error) { logs.push(`Desktop screenshot unavailable: ${error.message}`); }
     await app.screenshot({ path: path.join(diagnostics, "dispatch.png"), timeout: 3000 }).catch(() => {});
     logs.push(`Desktop result: ${await app.locator("#result").textContent({ timeout: 1000 }).catch(() => "unavailable")}`);
   }
@@ -115,6 +128,7 @@ try {
   const second = await browserContext.newPage();
   await first.goto(`${origin}/first`);
   await second.goto(`${origin}/second`);
+  logs.push(`Initial page focus: ${JSON.stringify(await Promise.all([first, second].map(page => page.evaluate(() => ({ focused: document.hasFocus(), element: document.activeElement.tagName })))) )}`);
   await expect(app.locator("#first-target option").filter({ hasText: "Banana smoke first" })).toHaveCount(1, { timeout: 30_000 });
   const firstValue = await app.locator("#first-target option").filter({ hasText: "Banana smoke first" }).getAttribute("value");
   const secondValue = await app.locator("#second-target option").filter({ hasText: "Banana smoke second" }).getAttribute("value");
@@ -137,8 +151,12 @@ try {
   logs.push(`Dispatch result: ${result}`);
   assert.ok(!result.includes("逾時"), `Foreground preparation timed out: ${result}`);
   assert.ok(result.startsWith("已嘗試發送"), `Dispatch rejected: ${result}`);
-  await expect.poll(() => first.evaluate(() => receivedKeys), { timeout: 5000 }).toEqual([{ code: "F8", trusted: true }]);
-  await expect.poll(() => second.evaluate(() => receivedKeys), { timeout: 5000 }).toEqual([{ code: "F8", trusted: true }]);
+  const pageState = () => Promise.all([first, second].map(page => page.evaluate(() => ({
+    keys: receivedKeys, focused: document.hasFocus(), element: document.activeElement.tagName,
+  }))));
+  logs.push(`Page state after dispatch: ${JSON.stringify(await pageState())}`);
+  await expect.poll(async () => (await pageState()).map(state => state.keys), { timeout: 5000 })
+    .toEqual([[{ code: "F8", trusted: true }], [{ code: "F8", trusted: true }]]);
   logs.push("PASS: both real Chromium tabs observed exactly one trusted F8 from installed desktop dispatch");
   console.log(logs.join("\n"));
 } catch (error) {
