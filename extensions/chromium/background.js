@@ -8,6 +8,17 @@ const RECONNECT_MAX_MS = 30000;
 // periodic alarm is the only event guaranteed to wake it, so the retry
 // loop restarts at least once a minute no matter what killed the worker.
 const CONNECT_WATCH_ALARM = "connect-watch";
+// Chromium window/tab activation is asynchronous: tabs.update/windows.update
+// resolve once the *request* is accepted, not once the target tab owns input
+// focus. Reporting `ready` before that commit lets the desktop inject a chord
+// into whatever tab/window is still active (on Windows this lands the first
+// target's key on the previously-active target, worse in later rounds). After
+// requesting activation, confirm the target is the active tab of a focused
+// window (bounded poll), then give the renderer a short beat to commit focus.
+const FOCUS_CONFIRM_TRIES = 20;
+const FOCUS_CONFIRM_INTERVAL_MS = 80;
+const FOCUS_SETTLE_MS = 100;
+function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
 function ensureConnectWatch() {
   chrome.alarms.create(CONNECT_WATCH_ALARM, { periodInMinutes: 1 });
@@ -82,6 +93,35 @@ async function prepareTarget(message) {
     if (tab.windowId !== target.window_id) throw new Error("tab 已不屬於預期視窗");
     await chrome.tabs.update(target.tab_id, { active: true });
     await chrome.windows.update(target.window_id, { focused: true });
+    // Activating a tab in an already-frontmost window does not change the
+    // foreground process, so the Windows verify_foreground gate cannot detect
+    // the still-pending switch. Wait until the target tab is genuinely the
+    // active tab of a focused window before acknowledging the prepare.
+    let confirmed = false;
+    for (let i = 0; i < FOCUS_CONFIRM_TRIES; i += 1) {
+      const [currentTab, currentWindow] = await Promise.all([
+        chrome.tabs.get(target.tab_id),
+        chrome.windows.get(target.window_id),
+      ]);
+      if (currentTab.active && currentWindow.focused) {
+        confirmed = true;
+        break;
+      }
+      await sleep(FOCUS_CONFIRM_INTERVAL_MS);
+    }
+    if (!confirmed) {
+      post({
+        type: "prepared",
+        request_id: message.request_id,
+        ready: false,
+        code: "focus_failed",
+        detail: "目標分頁啟用或視窗聚焦未能在期限內確認",
+      });
+      return;
+    }
+    // The active/focused flags commit before the renderer owns keyboard
+    // focus; a short beat lets the freshly-activated tab take input.
+    await sleep(FOCUS_SETTLE_MS);
     post({ type: "prepared", request_id: message.request_id, ready: true });
   } catch (error) {
     post({
