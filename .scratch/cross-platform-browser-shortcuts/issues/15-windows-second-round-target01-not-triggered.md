@@ -62,3 +62,16 @@ Windows 的 `verify_windows_foreground` 只比對**前景 process 名稱**
   Windows 實機送達仍待使用者確認（與 issue 14 一致的驗證邊界）。
 
 ## Comments
+
+### 2026-09-20：第二輪仍失敗——settle 不足
+
+使用者重載 extension 後回報「第二輪、目標01」仍顯示**已嘗試發送**，但目標01 頁面沒
+反應、目標02 正常。這代表桌面端走完全部閘門（`prepared ready:true`、前景驗證、
+`SendInput` 都成功），鍵卻沒進目標01——extension 的 `window.focused`/`tab.active`
+flag 為真時，**renderer 的實際鍵盤焦點尚未經 IPC 提交**，第一次注入被前一輪仍活著的
+目標02 吃掉。
+
+把 `FOCUS_SETTLE_MS` 由 100ms 拉到 **400ms**（送出前給 renderer 足夠時間把焦點真正
+交到目標 tab；confirm 迴圈仍設 1.6s 上限，總和最壞 2.0s，低於桌面 `PREPARE_TIMEOUT`
+3s）。確認這不是 spec 推翻：仍是「確認 + settle + fail-closed」的同一模式，只是把
+盲猜的定時窗口改得保守、安全。

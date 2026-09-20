@@ -14,7 +14,13 @@ const CONNECT_WATCH_ALARM = "connect-watch";
 // window (bounded poll), then give the renderer a short beat to commit focus.
 const FOCUS_CONFIRM_TRIES = 20;
 const FOCUS_CONFIRM_INTERVAL_MS = 80;
-const FOCUS_SETTLE_MS = 100;
+// After the focused/active flags flip, the renderer must still commit real
+// keyboard focus (WebContents focus travels via IPC). A too-short settle lets
+// the first injected chord land on the previous round's still-active tab —
+// observed as "second round, target 01 attempted but nothing happens". 400ms
+// is a safely conservative window, well under the desktop's 3s prepare
+// timeout; the confirm loop already bounds the wait so we never exceed it.
+const FOCUS_SETTLE_MS = 400;
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
 function ensureConnectWatch() {
