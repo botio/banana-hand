@@ -152,17 +152,23 @@ try {
     const extensionsPage = await browserContext.newPage();
     await extensionsPage.goto("chrome://extensions");
     await extensionsPage.locator("extensions-manager").evaluate(manager => {
-      const toolbar = manager.shadowRoot.querySelector("extensions-toolbar").shadowRoot;
-      const devMode = toolbar.querySelector("#devMode");
+      const devMode = manager.shadowRoot.querySelector("extensions-toolbar").shadowRoot.querySelector("#devMode");
       if (!devMode.checked) devMode.click();
     });
-    const [chooser] = await Promise.all([
-      extensionsPage.waitForEvent("filechooser", { timeout: 10_000 }),
-      extensionsPage.locator("extensions-manager").evaluate(manager => {
-        manager.shadowRoot.querySelector("extensions-toolbar").shadowRoot.querySelector("#loadUnpacked").click();
-      }),
-    ]);
-    await chooser.setFiles(extension);
+    await extensionsPage.locator("extensions-manager").evaluate(manager => {
+      manager.shadowRoot.querySelector("extensions-toolbar").shadowRoot.querySelector("#loadUnpacked").click();
+    });
+    execFileSync("pwsh", ["-NoProfile", "-Command", `
+      Add-Type -AssemblyName System.Windows.Forms
+      Start-Sleep -Milliseconds 800
+      [System.Windows.Forms.SendKeys]::SendWait('%d')
+      Start-Sleep -Milliseconds 200
+      [System.Windows.Forms.SendKeys]::SendWait(${JSON.stringify(extension)})
+      Start-Sleep -Milliseconds 200
+      [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+      Start-Sleep -Milliseconds 400
+      [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    `], { timeout: 15_000 });
     await extensionsPage.close();
   }
   const worker = browserContext.serviceWorkers()[0] ?? await browserContext.waitForEvent("serviceworker");
