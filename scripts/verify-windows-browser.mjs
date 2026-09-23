@@ -145,9 +145,26 @@ try {
   browserContext = await chromium.launchPersistentContext(path.join(temporary, "chromium"), {
     channel,
     headless: false,
-    args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
+    args: channel === "chrome" ? [] : [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
   });
   logs.push(`Browser channel ${channel}: ${browserContext.browser()?.version() ?? "unknown"}`);
+  if (channel === "chrome") {
+    const extensionsPage = await browserContext.newPage();
+    await extensionsPage.goto("chrome://extensions");
+    await extensionsPage.locator("extensions-manager").evaluate(manager => {
+      const toolbar = manager.shadowRoot.querySelector("extensions-toolbar").shadowRoot;
+      const devMode = toolbar.querySelector("#devMode");
+      if (!devMode.checked) devMode.click();
+    });
+    const [chooser] = await Promise.all([
+      extensionsPage.waitForEvent("filechooser", { timeout: 10_000 }),
+      extensionsPage.locator("extensions-manager").evaluate(manager => {
+        manager.shadowRoot.querySelector("extensions-toolbar").shadowRoot.querySelector("#loadUnpacked").click();
+      }),
+    ]);
+    await chooser.setFiles(extension);
+    await extensionsPage.close();
+  }
   const worker = browserContext.serviceWorkers()[0] ?? await browserContext.waitForEvent("serviceworker");
   worker.on("console", message => logs.push(`extension: ${message.text()}`));
   const first = await browserContext.newPage();
