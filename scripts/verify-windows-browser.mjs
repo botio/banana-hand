@@ -177,11 +177,15 @@ try {
       $name = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, 'Select the extension directory.')
       $dialog = $null
       foreach ($i in 1..20) {
-        $dialog = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst('Children', $name)
+        $dialog = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst('Descendants', $name)
         if ($dialog) { break }
         Start-Sleep -Milliseconds 250
       }
-      if (-not $dialog) { throw 'extension directory dialog not found' }
+      if (-not $dialog) {
+        $windows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll('Children', [System.Windows.Automation.Condition]::TrueCondition)
+        $names = @($windows | ForEach-Object { $_.Current.Name }) -join ' | '
+        throw "extension directory dialog not found; top windows: $names"
+      }
       $editType = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)
       $edits = @($dialog.FindAll('Descendants', $editType))
       if ($edits.Count -eq 0) { throw 'extension directory path field not found' }
