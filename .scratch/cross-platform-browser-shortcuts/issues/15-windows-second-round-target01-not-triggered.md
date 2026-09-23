@@ -1,8 +1,32 @@
-# 15. Windows 第二輪發送「目標01 沒觸發、目標02 有觸發」：prepared 偽造就緒
+# 15. Windows 同視窗雙分頁 Ctrl+R 漏送：激活順序回歸
 
 Type: task
 Status: resolved
 Supersedes: 14 (前景驗證的 Windows 側盲點)
+
+## 更正與 Windows 重現證據（2026-09-23）
+
+下方早期「Root cause」及 2026-09-20 的 renderer IPC／延遲不足解釋
+均屬未驗證推測，不可作為已確認根因。`已嘗試發送` 不證明送達，
+也不證明目標02 收到了目標01 的指令。原 11 個 extension 測試
+與單輪 F8 smoke 都未涵蓋使用者的 Ctrl+R 重新整理情境。
+
+使用者補充：Chrome 同一視窗、不同 TAB、原生 Ctrl+R。
+Windows runner 35822032889 用 HTTP 文件請求計數實際重現：
+第一輪 [0,2]（目標01 未重載，目標02 重載兩次），
+等待真正60秒冷卻後第二輪 [1,1]；兩輪 UI 均顯示已嘗試發送。
+
+只調整 Chromium `prepareTarget` 的激活順序：
+先 `windows.update({focused:true})`，再 `tabs.update({active:true})`。
+保留既有等待值、SendInput、確認與冷卻，不新增重送。
+Windows runner 35822348399 同一測試兩輪皆 [1,1]。
+這支持「視窗聚焦與分頁激活順序影響 Ctrl+R 目標」，
+不代表已證明 Chromium 內部 IPC 機制或所有平台／網站都正常。
+Firefox 此次未修改，因尚無對應重現。
+
+回歸腳本 `scripts/verify-windows-browser.mjs` 預設測原生 Ctrl+R，
+以兩個分頁各重載一次為通過條件；不攔截預設按鍵、不透過 API 重載。
+設定 `BANANA_SMOKE_CHORD=F8` 可保留原收鍵檢查。診斷分支尚未發布。
 
 ## Background
 
