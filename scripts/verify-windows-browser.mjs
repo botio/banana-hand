@@ -141,20 +141,33 @@ try {
   await app.locator("#dispatch").waitFor();
 
   const extension = path.resolve("extensions/chromium");
+  const channel = process.env.BANANA_SMOKE_CHANNEL ?? "chrome";
   browserContext = await chromium.launchPersistentContext(path.join(temporary, "chromium"), {
-    channel: "chromium",
+    channel,
     headless: false,
     args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
   });
+  logs.push(`Browser channel ${channel}: ${browserContext.browser()?.version() ?? "unknown"}`);
   const worker = browserContext.serviceWorkers()[0] ?? await browserContext.waitForEvent("serviceworker");
   worker.on("console", message => logs.push(`extension: ${message.text()}`));
   const first = await browserContext.newPage();
-  const second = await browserContext.newPage();
+  await first.goto(`${origin}/first`);
+  const firstTab = await worker.evaluate(async () => {
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    return { id: tab.id, windowId: tab.windowId };
+  });
+  const secondPage = browserContext.waitForEvent("page", { timeout: 10_000 });
+  await worker.evaluate(async ({ windowId, url }) => {
+    await chrome.tabs.create({ windowId, url, active: false });
+  }, { windowId: firstTab.windowId, url: `${origin}/second` });
+  const second = await secondPage;
   targetPages.push(first, second);
-  for (const page of targetPages) {
-    const session = await browserContext.newCDPSession(page);
-    await session.send("Emulation.setFocusEmulationEnabled", { enabled: false });
-  }
+  const windows = await worker.evaluate(async () => (await chrome.tabs.query({})).map(tab => ({
+    id: tab.id, windowId: tab.windowId, title: tab.title, url: tab.url, active: tab.active,
+  })));
+  logs.push(`Chrome tabs: ${JSON.stringify(windows)}`);
+  const smokeWindows = new Set(windows.filter(tab => tab.url?.includes("/first") || tab.url?.includes("/second")).map(tab => tab.windowId));
+  assert.equal(smokeWindows.size, 1, "targets must share one Chrome window");
   await first.goto(`${origin}/first`);
   await second.goto(`${origin}/second`);
   await expect(app.locator("#first-target option").filter({ hasText: "Banana smoke first" })).toHaveCount(1, { timeout: 30_000 });
