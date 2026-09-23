@@ -84,7 +84,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "banana-hand"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "banana-hand-protocol",
  "core-foundation",
@@ -104,7 +104,7 @@ dependencies = [
 
 [[package]]
 name = "banana-hand-native-host"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "banana-hand-protocol",
  "serde_json",
@@ -114,7 +114,7 @@ dependencies = [
 
 [[package]]
 name = "banana-hand-protocol"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "serde",
  "serde_json",
@@ -1341,7 +1341,7 @@ dependencies = [
 
 [[package]]
 name = "hyper-util"
-version = "0.1.20"
+version = "0.1.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96547c2556ec9d12fb1578c4eaf448b04993e7fb79cbaad930a656880a6bdfa0"
 dependencies = [
