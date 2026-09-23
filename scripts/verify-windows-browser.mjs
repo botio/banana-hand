@@ -194,7 +194,24 @@ try {
       $buttonName = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, 'Select Folder')
       $button = $dialog.FindFirst('Descendants', $buttonName)
       if (-not $button) { throw 'Select Folder button not found' }
-      $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+      $clicked = $false
+      try {
+        $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        $clicked = $true
+      } catch {}
+      if (-not $clicked) {
+        try {
+          $button.GetCurrentPattern([System.Windows.Automation.LegacyIAccessiblePattern]::Pattern).DoDefaultAction()
+          $clicked = $true
+        } catch {}
+      }
+      if (-not $clicked) {
+        Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class BananaMouse { [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y); [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint x, uint y, uint d, int e); }'
+        $rect = $button.Current.BoundingRectangle
+        [BananaMouse]::SetCursorPos([int]($rect.X + $rect.Width / 2), [int]($rect.Y + $rect.Height / 2)) | Out-Null
+        [BananaMouse]::mouse_event(2, 0, 0, 0, 0)
+        [BananaMouse]::mouse_event(4, 0, 0, 0, 0)
+      }
     `], { env: { ...process.env, BANANA_EXTENSION_DIR: extension }, timeout: 20_000 });
     captureDesktop("load-extension.png");
     const extensionUi = await extensionsPage.locator("extensions-manager").evaluate(manager => manager.shadowRoot.textContent);
