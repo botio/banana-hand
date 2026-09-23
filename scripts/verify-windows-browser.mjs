@@ -144,6 +144,10 @@ try {
   const first = await browserContext.newPage();
   const second = await browserContext.newPage();
   targetPages.push(first, second);
+  for (const page of targetPages) {
+    const session = await browserContext.newCDPSession(page);
+    await session.send("Emulation.setFocusEmulationEnabled", { enabled: false });
+  }
   await first.goto(`${origin}/first`);
   await second.goto(`${origin}/second`);
   await expect(app.locator("#first-target option").filter({ hasText: "Banana smoke first" })).toHaveCount(1, { timeout: 30_000 });
