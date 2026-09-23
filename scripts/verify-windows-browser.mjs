@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile, cp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -162,6 +162,9 @@ try {
   });
   logs.push(`Browser channel ${channel}: ${browserContext.browser()?.version() ?? "unknown"}`);
   if (channel === "chrome") {
+    const loadPath = path.join(process.env.USERPROFILE ?? temporary, "banana-hand-extension");
+    await cp(extension, loadPath, { recursive: true });
+    logs.push(`Loading unpacked extension from ${loadPath}`);
     const extensionsPage = await browserContext.newPage();
     await extensionsPage.goto("chrome://extensions");
     await extensionsPage.locator("extensions-manager").evaluate(manager => {
@@ -212,7 +215,7 @@ try {
         [BananaMouse]::mouse_event(2, 0, 0, 0, 0)
         [BananaMouse]::mouse_event(4, 0, 0, 0, 0)
       }
-    `], { env: { ...process.env, BANANA_EXTENSION_DIR: extension }, timeout: 20_000 });
+    `], { env: { ...process.env, BANANA_EXTENSION_DIR: loadPath }, timeout: 20_000 });
     captureDesktop("load-extension.png");
     const extensionUi = await extensionsPage.locator("extensions-manager").evaluate(manager => manager.shadowRoot.textContent);
     logs.push(`Extensions page: ${extensionUi.replace(/\\s+/g, " ").slice(0, 500)}`);
