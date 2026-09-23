@@ -19,13 +19,25 @@ let desktop;
 let browserContext;
 let webview;
 let app;
+const targetPages = [];
 const server = createServer((request, response) => {
   const name = request.url === "/second" ? "second" : "first";
   response.setHeader("Content-Type", "text/html; charset=utf-8");
   response.end(`<!doctype html><title>Banana smoke ${name}</title><h1>${name}</h1><output id="keys">0</output><script>
     window.receivedKeys = [];
+    window.inputTrace = [];
+    const trace = (type, event) => inputTrace.push({
+      type, at: Date.now(), focused: document.hasFocus(),
+      visibility: document.visibilityState,
+      key: event?.key, code: event?.code, trusted: event?.isTrusted
+    });
+    addEventListener('focus', event => trace('focus', event));
+    addEventListener('blur', event => trace('blur', event));
+    document.addEventListener('visibilitychange', event => trace('visibilitychange', event));
+    addEventListener('keyup', event => trace('keyup', event));
     addEventListener('keydown', event => {
       event.preventDefault();
+      trace('keydown', event);
       receivedKeys.push({key:event.key, code:event.code, trusted:event.isTrusted});
       document.querySelector('#keys').textContent = receivedKeys.length;
     });
@@ -34,12 +46,19 @@ const server = createServer((request, response) => {
 await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
 const origin = `http://127.0.0.1:${server.address().port}`;
 const watchdog = setTimeout(() => {
-  logs.push("FAIL: browser smoke exceeded 90 seconds");
+  logs.push("FAIL: browser smoke exceeded 240 seconds");
   void finish().finally(() => process.exit(1));
-}, 90_000);
+}, 240_000);
 
 async function finish() {
   clearTimeout(watchdog);
+  for (const [index, page] of targetPages.entries()) {
+    const evidence = await page.evaluate(() => ({
+      keys: receivedKeys, trace: inputTrace, focused: document.hasFocus(),
+      visibility: document.visibilityState,
+    })).catch(error => ({ error: error.message }));
+    await writeFile(path.join(diagnostics, `target-${index + 1}.json`), JSON.stringify(evidence, null, 2));
+  }
   if (app) {
     try {
       execFileSync("pwsh", ["-NoProfile", "-Command", `
@@ -124,6 +143,7 @@ try {
   worker.on("console", message => logs.push(`extension: ${message.text()}`));
   const first = await browserContext.newPage();
   const second = await browserContext.newPage();
+  targetPages.push(first, second);
   await first.goto(`${origin}/first`);
   await second.goto(`${origin}/second`);
   await expect(app.locator("#first-target option").filter({ hasText: "Banana smoke first" })).toHaveCount(1, { timeout: 30_000 });
@@ -138,21 +158,38 @@ try {
   await app.getByRole("button", { name: "新增快捷鍵" }).click();
   await app.locator("#first-target").selectOption(firstValue);
   await app.locator("#second-target").selectOption(secondValue);
-  await expect(app.locator("#dispatch")).toBeEnabled();
-  // Make the actual desktop window foreground before its synchronous command
-  // runs; a CDP tab click alone does not reproduce Windows focus handoff.
-  execFileSync("pwsh", ["-NoProfile", "-Command", `$shell = New-Object -ComObject WScript.Shell; if (-not $shell.AppActivate(${desktop.pid})) { throw 'Could not foreground desktop' }`]);
-  await app.locator("#dispatch").click();
-  await expect(app.locator("#result")).not.toContainText("正在要求", { timeout: 20_000 });
-  const result = await app.locator("#result").textContent();
-  logs.push(`Dispatch result: ${result}`);
-  assert.ok(!result.includes("逾時"), `Foreground preparation timed out: ${result}`);
-  assert.ok(result.startsWith("已嘗試發送"), `Dispatch rejected: ${result}`);
-  const pageKeys = () => Promise.all([first, second].map(page => page.evaluate(() => receivedKeys)));
-  logs.push(`Page keys after dispatch: ${JSON.stringify(await pageKeys())}`);
-  await expect.poll(pageKeys, { timeout: 5000 })
-    .toEqual([[{ key: "F8", code: "F8", trusted: true }], [{ key: "F8", code: "F8", trusted: true }]]);
-  logs.push("PASS: both real Chromium tabs observed exactly one trusted F8 from desktop dispatch");
+  const failures = [];
+  const pageKeys = () => Promise.all(targetPages.map(page => page.evaluate(() => receivedKeys)));
+  let previousDispatchAt;
+  for (let round = 1; round <= 2; round += 1) {
+    if (previousDispatchAt !== undefined) {
+      // Use the real cooldown. Do not restart the app, clear its state, or
+      // foreground either target between rounds.
+      await delay(Math.max(0, previousDispatchAt + 61_000 - Date.now()));
+    }
+    await expect(app.locator("#dispatch")).toBeEnabled({ timeout: 10_000 });
+    const before = await pageKeys();
+    logs.push(`Round ${round} before: ${JSON.stringify(before)}`);
+    // A CDP click alone does not reproduce the user's Windows focus handoff.
+    execFileSync("pwsh", ["-NoProfile", "-Command", `$shell = New-Object -ComObject WScript.Shell; if (-not $shell.AppActivate(${desktop.pid})) { throw 'Could not foreground desktop' }`]);
+    const startedAt = Date.now();
+    await app.locator("#dispatch").click();
+    await expect(app.locator("#result")).not.toContainText("正在要求", { timeout: 20_000 });
+    previousDispatchAt = Date.now();
+    const result = await app.locator("#result").textContent();
+    logs.push(`Round ${round} at ${startedAt}, result: ${result}`);
+    if (!result.startsWith("已嘗試發送")) failures.push(`Round ${round}: ${result}`);
+    const roundKeys = async () => (await pageKeys()).map((keys, index) => keys.slice(before[index].length));
+    try {
+      await expect.poll(roundKeys, { timeout: 5000 })
+        .toEqual([[{ key: "F8", code: "F8", trusted: true }], [{ key: "F8", code: "F8", trusted: true }]]);
+      logs.push(`PASS: round ${round}, each target received exactly one trusted F8`);
+    } catch (error) {
+      failures.push(`Round ${round}: ${error.message}`);
+    }
+    logs.push(`Round ${round} received: ${JSON.stringify(await roundKeys())}`);
+  }
+  assert.deepEqual(failures, [], "Every target must receive one chord in each round");
   console.log(logs.join("\n"));
 } catch (error) {
   logs.push(error.stack ?? String(error));
