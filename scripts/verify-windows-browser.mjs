@@ -20,8 +20,15 @@ let browserContext;
 let webview;
 let app;
 const targetPages = [];
+const reloadMode = process.env.BANANA_SMOKE_CHORD !== "F8";
+const loads = [0, 0];
 const server = createServer((request, response) => {
-  const name = request.url === "/second" ? "second" : "first";
+  const index = request.url === "/first" ? 0 : request.url === "/second" ? 1 : -1;
+  if (index === -1) { response.writeHead(404).end(); return; }
+  loads[index] += 1;
+  logs.push(`Document request target ${index + 1} at ${Date.now()}, count ${loads[index]}`);
+  const name = index === 0 ? "first" : "second";
+  response.setHeader("Cache-Control", "no-store");
   response.setHeader("Content-Type", "text/html; charset=utf-8");
   response.end(`<!doctype html><title>Banana smoke ${name}</title><h1>${name}</h1><output id="keys">0</output><script>
     window.receivedKeys = [];
@@ -36,7 +43,7 @@ const server = createServer((request, response) => {
     document.addEventListener('visibilitychange', event => trace('visibilitychange', event));
     addEventListener('keyup', event => trace('keyup', event));
     addEventListener('keydown', event => {
-      event.preventDefault();
+      if (!${reloadMode}) event.preventDefault();
       trace('keydown', event);
       receivedKeys.push({key:event.key, code:event.code, trusted:event.isTrusted});
       document.querySelector('#keys').textContent = receivedKeys.length;
@@ -156,9 +163,9 @@ try {
   assert.ok(firstValue && secondValue);
   logs.push("PASS: real extension hello and both tab snapshots reached desktop");
 
-  await app.getByRole("textbox", { name: "快捷鍵名稱" }).fill("Windows smoke F8");
+  await app.getByRole("textbox", { name: "快捷鍵名稱" }).fill(reloadMode ? "Windows smoke Ctrl+R" : "Windows smoke F8");
   await app.getByRole("button", { name: "快捷鍵組合" }).click();
-  await app.keyboard.press("F8");
+  await app.keyboard.press(reloadMode ? "Control+r" : "F8");
   await app.getByRole("button", { name: "新增快捷鍵" }).click();
   await app.locator("#first-target").selectOption(firstValue);
   await app.locator("#second-target").selectOption(secondValue);
@@ -172,7 +179,7 @@ try {
       await delay(Math.max(0, previousDispatchAt + 61_000 - Date.now()));
     }
     await expect(app.locator("#dispatch")).toBeEnabled({ timeout: 10_000 });
-    const before = await pageKeys();
+    const before = reloadMode ? [...loads] : await pageKeys();
     logs.push(`Round ${round} before: ${JSON.stringify(before)}`);
     // A CDP click alone does not reproduce the user's Windows focus handoff.
     execFileSync("pwsh", ["-NoProfile", "-Command", `$shell = New-Object -ComObject WScript.Shell; if (-not $shell.AppActivate(${desktop.pid})) { throw 'Could not foreground desktop' }`]);
@@ -183,11 +190,13 @@ try {
     const result = await app.locator("#result").textContent();
     logs.push(`Round ${round} at ${startedAt}, result: ${result}`);
     if (!result.startsWith("已嘗試發送")) failures.push(`Round ${round}: ${result}`);
-    const roundKeys = async () => (await pageKeys()).map((keys, index) => keys.slice(before[index].length));
+    const roundKeys = async () => reloadMode
+      ? loads.map((count, index) => count - before[index])
+      : (await pageKeys()).map((keys, index) => keys.slice(before[index].length));
     try {
       await expect.poll(roundKeys, { timeout: 5000 })
-        .toEqual([[{ key: "F8", code: "F8", trusted: true }], [{ key: "F8", code: "F8", trusted: true }]]);
-      logs.push(`PASS: round ${round}, each target received exactly one trusted F8`);
+        .toEqual(reloadMode ? [1, 1] : [[{ key: "F8", code: "F8", trusted: true }], [{ key: "F8", code: "F8", trusted: true }]]);
+      logs.push(`PASS: round ${round}, each target ${reloadMode ? "reloaded exactly once via native Ctrl+R" : "received exactly one trusted F8"}`);
     } catch (error) {
       failures.push(`Round ${round}: ${error.message}`);
     }
