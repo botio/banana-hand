@@ -20,6 +20,19 @@ let browserContext;
 let webview;
 let app;
 const targetPages = [];
+function captureDesktop(name) {
+  execFileSync("pwsh", ["-NoProfile", "-Command", `
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    $bounds = [Windows.Forms.SystemInformation]::VirtualScreen
+    $bitmap = [Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    try {
+      $graphics.CopyFromScreen($bounds.Left, $bounds.Top, 0, 0, $bitmap.Size)
+      $bitmap.Save($env:BANANA_SMOKE_SCREENSHOT, [Drawing.Imaging.ImageFormat]::Png)
+    } finally { $graphics.Dispose(); $bitmap.Dispose() }
+  `], { env: { ...process.env, BANANA_SMOKE_SCREENSHOT: path.join(diagnostics, name) }, timeout: 8000 });
+}
 const reloadMode = process.env.BANANA_SMOKE_CHORD !== "F8";
 const loads = [0, 0];
 const server = createServer((request, response) => {
@@ -169,6 +182,9 @@ try {
       Start-Sleep -Milliseconds 400
       [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     `], { timeout: 15_000 });
+    captureDesktop("load-extension.png");
+    const extensionUi = await extensionsPage.locator("extensions-manager").evaluate(manager => manager.shadowRoot.textContent);
+    logs.push(`Extensions page: ${extensionUi.replace(/\\s+/g, " ").slice(0, 500)}`);
     await extensionsPage.close();
   }
   const worker = browserContext.serviceWorkers()[0] ?? await browserContext.waitForEvent("serviceworker");
