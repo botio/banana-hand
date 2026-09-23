@@ -97,8 +97,8 @@ async function prepareTarget(message) {
   try {
     const tab = await chrome.tabs.get(target.tab_id);
     if (tab.windowId !== target.window_id) throw new Error("tab 已不屬於預期視窗");
-    await chrome.tabs.update(target.tab_id, { active: true });
     await chrome.windows.update(target.window_id, { focused: true });
+    await chrome.tabs.update(target.tab_id, { active: true });
     // Activating a tab in an already-frontmost window does not change the
     // foreground process, so the Windows verify_foreground gate cannot detect
     // the still-pending switch. Wait until the target tab is genuinely the
