@@ -172,16 +172,26 @@ try {
       manager.shadowRoot.querySelector("extensions-toolbar").shadowRoot.querySelector("#loadUnpacked").click();
     });
     execFileSync("pwsh", ["-NoProfile", "-Command", `
-      Add-Type -AssemblyName System.Windows.Forms
-      Start-Sleep -Milliseconds 800
-      [System.Windows.Forms.SendKeys]::SendWait('%d')
-      Start-Sleep -Milliseconds 200
-      [System.Windows.Forms.SendKeys]::SendWait(${JSON.stringify(extension)})
-      Start-Sleep -Milliseconds 200
-      [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
-      Start-Sleep -Milliseconds 400
-      [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
-    `], { timeout: 15_000 });
+      Add-Type -AssemblyName UIAutomationClient
+      $path = $env:BANANA_EXTENSION_DIR
+      $name = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, 'Select the extension directory.')
+      $dialog = $null
+      foreach ($i in 1..20) {
+        $dialog = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst('Children', $name)
+        if ($dialog) { break }
+        Start-Sleep -Milliseconds 250
+      }
+      if (-not $dialog) { throw 'extension directory dialog not found' }
+      $editType = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)
+      $edits = @($dialog.FindAll('Descendants', $editType))
+      if ($edits.Count -eq 0) { throw 'extension directory path field not found' }
+      $value = $edits[-1].GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+      $value.SetValue($path)
+      $buttonName = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, 'Select Folder')
+      $button = $dialog.FindFirst('Descendants', $buttonName)
+      if (-not $button) { throw 'Select Folder button not found' }
+      $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    `], { env: { ...process.env, BANANA_EXTENSION_DIR: extension }, timeout: 20_000 });
     captureDesktop("load-extension.png");
     const extensionUi = await extensionsPage.locator("extensions-manager").evaluate(manager => manager.shadowRoot.textContent);
     logs.push(`Extensions page: ${extensionUi.replace(/\\s+/g, " ").slice(0, 500)}`);
