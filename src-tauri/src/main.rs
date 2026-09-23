@@ -156,6 +156,15 @@ fn request_dispatch(
             reason: error.to_string(),
         });
     }
+    // SendInput returns when the chord is queued, not when Chrome has
+    // handled it. Switching to target 02 before that makes both chords land
+    // on target 02. Hold target 01 until its reload starts, or the hold
+    // window ends.
+    let _ = hold_target(
+        &state.coordinator,
+        &request.first_target,
+        &request.request_id,
+    );
     state.coordinator.lock().cooldown_started_at = Some(Instant::now());
     let first_attempt = DispatchAttempt {
         target: request.first_target.clone(),
@@ -261,6 +270,38 @@ fn prepare_target(
     receiver
         .recv_timeout(PREPARE_TIMEOUT)
         .map_err(|_| "目標前景驗證逾時；發送已拒絕".into())
+}
+
+fn hold_target(
+    coordinator: &Arc<Mutex<DispatchCoordinator>>,
+    target: &TabTarget,
+    parent_request_id: &str,
+) -> Result<(), String> {
+    let request_id = format!("{parent_request_id}:{}:hold", target_key(target));
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let port = {
+        let mut coordinator = coordinator.lock();
+        let port = coordinator
+            .browser_ports
+            .get(&bridge::connection_key_for_target(target))
+            .cloned()
+            .ok_or("目標的 browser bridge 已斷線")?;
+        coordinator
+            .pending_prepares
+            .insert(request_id.clone(), sender);
+        port
+    };
+    if port
+        .send(json!({ "type": "hold", "request_id": request_id, "target": target }))
+        .is_err()
+    {
+        coordinator.lock().pending_prepares.remove(&request_id);
+        return Err("目標的 browser bridge 已斷線".into());
+    }
+    receiver
+        .recv_timeout(PREPARE_TIMEOUT)
+        .map(|_| ())
+        .map_err(|_| "目標快捷鍵尚未被瀏覽器處理".into())
 }
 
 fn prepare_status(result: &bridge::PreparedResult) -> AttemptStatus {

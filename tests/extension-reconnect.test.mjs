@@ -9,7 +9,7 @@ function event() {
   const listeners = [];
   return {
     addListener(listener) { listeners.push(listener); },
-    emit(value) { for (const listener of listeners) listener(value); },
+    emit(...values) { for (const listener of listeners) listener(...values); },
   };
 }
 
@@ -136,6 +136,22 @@ for (const kind of ["chromium", "firefox"]) {
     assert.equal(prepared.length, 1, "exactly one prepared result after focus commits");
     assert.equal(prepared[0].ready, true, "ready only after the target owns focus");
     assert.equal(prepared[0].code, undefined, "no failure code on the happy path");
+  });
+
+  test(`${kind}: hold waits for the armed tab to start loading before the next target`, async () => {
+    const harness = await extension(kind);
+    const hello = harness.ports[0].messages.find(message => message.type === "hello");
+    const hold = prepareMessage(hello);
+    hold.type = "hold";
+    hold.request_id = "hold-1";
+    harness.ports[0].onMessage.emit(hold);
+    await setImmediate();
+    assert.equal(harness.ports[0].messages.filter(message => message.request_id === "hold-1").length, 0);
+    harness.api.tabs.onUpdated.emit(7, { status: "loading" });
+    await harness.retry();
+    const result = harness.ports[0].messages.find(message => message.request_id === "hold-1");
+    assert.equal(result?.type, "prepared");
+    assert.equal(result?.ready, true);
   });
 
   test(`${kind}: prepare reports focus_failed and never ready:true when the target never gains focus`, async () => {

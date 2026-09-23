@@ -22,6 +22,13 @@ const FOCUS_CONFIRM_INTERVAL_MS = 80;
 // timeout; the confirm loop already bounds the wait so we never exceed it.
 const FOCUS_SETTLE_MS = 400;
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+const CHORD_HOLD_MS = 1200;
+const chordArmedAt = new Map();
+const chordLoadedAt = new Map();
+browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === "loading") chordLoadedAt.set(tabId, Date.now());
+});
+
 
 function ensureConnectWatch() {
   browser.alarms.create(CONNECT_WATCH_ALARM, { periodInMinutes: 1 });
@@ -125,6 +132,8 @@ async function prepareTarget(message) {
     // The active/focused flags commit before the renderer owns keyboard
     // focus; a short beat lets the freshly-activated tab take input.
     await sleep(FOCUS_SETTLE_MS);
+    chordArmedAt.set(target.tab_id, Date.now());
+    chordLoadedAt.delete(target.tab_id);
     post({ type: "prepared", request_id: message.request_id, ready: true });
   } catch (error) {
     post({
@@ -135,6 +144,26 @@ async function prepareTarget(message) {
       detail: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+async function holdTarget(message) {
+  const target = message.target;
+  if (target.browser !== BROWSER_KIND
+    || target.browser_instance_id !== browserInstanceId
+    || target.session_nonce !== sessionNonce) {
+    post({ type: "prepared", request_id: message.request_id, ready: false, code: "rejected_stale" });
+    return;
+  }
+  const armed = chordArmedAt.get(target.tab_id) ?? Date.now();
+  const deadline = Date.now() + CHORD_HOLD_MS;
+  while (Date.now() < deadline) {
+    if ((chordLoadedAt.get(target.tab_id) ?? 0) >= armed) {
+      post({ type: "prepared", request_id: message.request_id, ready: true });
+      return;
+    }
+    await sleep(40);
+  }
+  post({ type: "prepared", request_id: message.request_id, ready: true, code: "hold_timeout" });
 }
 
 function connectNativeHost() {
@@ -168,6 +197,7 @@ function connectNativeHost() {
     }
     lastDisconnectReason = undefined;
     if (message.type === "prepare") void prepareTarget(message);
+    if (message.type === "hold") void holdTarget(message);
   });
   port.onDisconnect.addListener(() => {
     if (nativePort !== port) return;
