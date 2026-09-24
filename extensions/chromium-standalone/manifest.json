@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Banana Hand",
+  "version": "0.1.24",
+  "minimum_chrome_version": "118",
+  "description": "對兩個瀏覽器分頁依序發送自訂快捷鍵，不需桌面程式。",
+  "permissions": ["tabs", "storage", "scripting"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "icons": {"16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png", "64": "icons/icon-64.png", "128": "icons/icon-128.png"},
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_icon": {"16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png", "64": "icons/icon-64.png", "128": "icons/icon-128.png"},
+    "default_title": "開啟 Banana Hand 獨立試用面板"
+  }
+}

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>雙分頁快捷鍵｜獨立試用版</title>
+  <link rel="stylesheet" href="panel.css">
+  <link rel="icon" href="icons/icon-32.png" type="image/png">
+  <script src="panel.js" type="module"></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="page-header">
+      <div><p class="eyebrow">STANDALONE / 雙分頁試用版</p><h1>一次操作，兩個分頁。</h1><p class="subtitle">直接由此擴充功能傳送自訂按鍵，不需桌面程式或橋接服務。</p></div>
+      <span id="connection" class="connection">連線中</span>
+    </header>
+
+    <aside class="safety-note" aria-labelledby="safety-title">
+      <span class="note-marker" aria-hidden="true">!</span>
+      <div><h2 id="safety-title">請先使用模擬帳戶測試</h2><p>這是合成按鍵工具，不是訂單確認工具。兩個分頁各自接收，<strong>不是原子交易</strong>；可能只有一邊觸發。請自行核對帳戶、焦點、商品與數量。</p><p>不使用 debugger 或桌面程式。需要網站存取權限才能發送事件；事件的 <strong>isTrusted=false，Tradovate 可能忽略</strong>。不自動重試。已嘗試傳送不代表訂單成立或成交。</p></div>
+    </aside>
+
+    <div id="message" class="message" role="alert" hidden></div>
+
+    <div class="workspace">
+      <div class="configuration">
+        <section class="card" aria-labelledby="targets-title">
+          <div class="section-heading"><div><p class="step">01 / 目的地</p><h2 id="targets-title">選擇兩個分頁</h2></div><button id="refresh-tabs" class="button subtle" type="button">重新整理</button></div>
+          <p class="help">選取已開啟的交易分頁；擴充功能頁面不會列入。目標只保留在本次瀏覽器工作階段。</p>
+          <div class="field"><label for="target-one">分頁 A</label><select id="target-one"><option value="">選擇分頁</option></select></div>
+          <div class="field"><label for="target-two">分頁 B</label><select id="target-two"><option value="">選擇分頁</option></select></div>
+          <div class="form-footer"><span id="target-status" class="help">尚未設定目的地</span><button id="save-targets" class="button secondary" type="button" disabled>儲存目的地</button></div>
+        </section>
+
+        <section class="card" aria-labelledby="shortcuts-title">
+          <div class="section-heading"><div><p class="step">02 / 按鍵設定</p><h2 id="shortcuts-title">自訂快捷鍵</h2></div><button id="new-shortcut" class="button subtle" type="button">新增快捷鍵</button></div>
+          <p class="help">儲存的是要傳給網頁的按鍵，不是全域熱鍵。Tradovate 可先測試買入 <kbd>Shift+B</kbd>、賣出 <kbd>Shift+S</kbd>；請先確認平台內的設定。</p>
+          <ul id="shortcut-list" class="shortcut-list" aria-label="已儲存的快捷鍵"></ul>
+          <form id="shortcut-form" class="shortcut-editor">
+            <h3 id="editor-title">新增快捷鍵</h3>
+            <div class="field"><label for="shortcut-name">名稱</label><input id="shortcut-name" name="name" type="text" maxlength="48" placeholder="例如：模擬買入" required autocomplete="off"></div>
+            <div class="field"><label for="shortcut-chord">按鍵組合</label><div class="input-with-button"><input id="shortcut-chord" name="chord" type="text" maxlength="100" placeholder="Shift+B" required autocomplete="off" spellcheck="false" aria-describedby="capture-help"><button id="capture-key" class="button secondary" type="button">擷取按鍵</button></div><p id="capture-help" class="help">可直接輸入，或按「擷取按鍵」後按下組合鍵。部分瀏覽器／系統保留鍵無法攔截。</p></div>
+            <div class="editor-actions"><button id="save-shortcut" class="button secondary" type="submit">儲存快捷鍵</button><button id="cancel-edit" class="button subtle" type="button" hidden>取消編輯</button></div>
+          </form>
+        </section>
+      </div>
+
+      <div class="execution">
+        <section class="card dispatch-card" aria-labelledby="dispatch-title">
+          <p class="step">03 / 核對並傳送</p><h2 id="dispatch-title">確認這次操作</h2>
+          <div class="field"><label for="dispatch-shortcut">要傳送的快捷鍵</label><select id="dispatch-shortcut"><option value="">選擇快捷鍵</option></select></div>
+          <div class="dispatch-summary"><p class="summary-caption">相同按鍵將分別傳送至</p><div class="target-summary"><span class="target-tag">A</span><div><strong id="summary-one">尚未選擇</strong><span id="summary-one-url" class="summary-url"></span></div></div><div class="target-summary"><span class="target-tag">B</span><div><strong id="summary-two">尚未選擇</strong><span id="summary-two-url" class="summary-url"></span></div></div><div class="chord-summary"><span id="summary-name">尚未選擇快捷鍵</span><kbd id="summary-chord">—</kbd></div></div>
+          <div class="cooldown-row"><span id="dispatch-status">等待設定</span><span id="cooldown" class="cooldown">15 秒冷卻保護</span></div>
+          <button id="send" class="button primary" type="button" disabled>傳送至兩個分頁</button>
+          <p id="send-help" class="help">請先完成目的地與快捷鍵設定。</p>
+          <p class="dispatch-footnote">每次傳送前先開始 15 秒冷卻，即使失敗也不縮短。工具不自動重試；再次操作前請親自核對兩邊狀態。</p>
+        </section>
+
+        <section class="card results-card" aria-labelledby="results-title"><div class="section-heading"><div><p class="step">最近一次</p><h2 id="results-title">傳送紀錄</h2></div><span class="small-label">非成交回報</span></div><div id="results" aria-live="polite"><p class="empty-state">尚無傳送紀錄。完成設定後，先在模擬帳戶測試。</p></div></section>
+      </div>
+    </div>
+    <footer class="page-footer">快捷鍵儲存在此瀏覽器本機。關閉控制頁不代表已送出的操作已取消；請至目標分頁確認。</footer>
+  </main>
+</body>
+</html>

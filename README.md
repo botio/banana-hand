@@ -6,11 +6,27 @@
 
 Banana Hand 適合已經在網站或網頁工具中使用快捷鍵，希望省去來回切換分頁、重複按鍵的人。你可以替快捷鍵取名字、儲存在清單裡，再選擇這次要操作的兩個分頁。
 
-**第一次使用，要安裝兩個部分：桌面 App ＋ 瀏覽器插件。** 只安裝其中一個，還不能使用完整功能。一般使用者不需要安裝 Node.js、Rust，也不需要下載原始碼或自己編譯。
+**桌面版需要安裝桌面 App ＋ 瀏覽器橋接插件。** 另有下述免 App 的 Chrome 獨立試用版，兩者是不同擴充功能，請勿混用安裝包。
 
 [下載 App 與插件](https://github.com/botio/banana-hand/releases) · [插件完整安裝教學](docs/browser-extension-installation.md) · [隱私權政策](PRIVACY.md)
 
 > **目前版本：0.1.17。** Windows 版本已由使用者回報可正常使用；Chrome 前景切換及快捷鍵辨識問題已在這版修正。發布仍標為 **Preview／Pre-release**，表示尚未涵蓋所有電腦、網站與瀏覽器組合，不是要求你改用開發版瀏覽器。
+
+## 插件 0.1.22 已取代橋接插件
+
+0.1.22 起，Chrome 與 Firefox 的正式插件都是獨立版：自訂快捷鍵、雙分頁發送、15 秒冷卻、圖示，不需要桌面 App，也不使用 debugger。它取代 0.1.21 的 Browser Bridge 插件；桌面 App 安裝檔未在這次重編。
+
+Chrome 本機載入：`dist/chromium-extension/banana-hand-chromium-0.1.22.zip`。Chrome Web Store 上傳：`banana-hand-chrome-webstore-0.1.22.zip`（已移除固定 ID key）。Firefox 未簽署安裝包：`dist/firefox-extension/banana-hand-firefox-0.1.22.xpi`，附加元件 ID 仍是 `bridge@banana-hand.dev`，用以取代舊橋接插件；正式版 Firefox 仍需 AMO 簽署後才能永久安裝。
+
+**Tradovate 相容性尚未驗證，請先用模擬帳戶測試。** 已嘗試發送不代表訂單成立或成交；兩邊操作不是原子交易，可能僅一邊成功。工具不會自動重試或補送，冷卻期間禁止再次發送。兩個分頁若指向同一帳戶／商品，可能累計兩筆訂單。
+
+### Firefox 獨立試用版
+
+執行 `npm run package-firefox-standalone-extension`，由同一份獨立插件來源產生 `dist/firefox-standalone/banana-hand-firefox-standalone-temporary-0.1.1.zip`。Firefox 桌面版最低 140；使用獨立 ID `standalone@banana-hand.dev`，不會取代桌面 App 的橋接插件。具備圖示、15 秒冷卻及自訂合成快捷鍵，不需要 App 或 debugger 權限。
+
+目前 ZIP 未經 Mozilla 簽署，只能暫時載入：解壓縮後開啟 `about:debugging#/runtime/this-firefox` →「載入暫存附加元件」→ 選擇 `manifest.json`。允許目標網站的存取權限後，點圖示開啟控制頁。Firefox 重啟後需要重新載入；永久安裝仍需 AMO 簽署，不能將 ZIP 改副檔名當作已簽署 XPI。`about:debugging` 僅用於安裝，不代表插件透過 debugger 發送按鍵。
+
+已在 Firefox 155 測試版引擎的本機雙分頁收到完整 Shift+B／Shift+S 事件，並確認 15 秒冷卻；尚未驗證 Firefox 上的 Tradovate。請先用模擬帳戶測試。
 
 ## 目錄
 
